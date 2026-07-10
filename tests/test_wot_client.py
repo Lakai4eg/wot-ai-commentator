@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from wot_ai_commentator.games.wot.client import DataProviderClient
+from stream_director.games.wot.client import WotStatClient
 
 
 def _init(states):
@@ -25,7 +25,7 @@ def _trigger(path, value=None):
 
 @pytest.fixture
 def client():
-    return DataProviderClient()
+    return WotStatClient()
 
 
 async def test_init_populates_state_and_get(client):
@@ -158,7 +158,7 @@ async def test_last_event_at_updates(client):
 @pytest.mark.asyncio
 async def test_on_live_fires_once_per_connect():
     calls = []
-    c = DataProviderClient(on_live=lambda: calls.append(1))
+    c = WotStatClient(on_live=lambda: calls.append(1))
     init = json.dumps({"type": "init", "states": []})
     await c.handle_message(init)
     await c.handle_message(init)  # повторный init того же коннекта — без дубля

@@ -1,5 +1,5 @@
-from wot_ai_commentator.events import Stimulus
-from wot_ai_commentator.games.base import ActiveGameTracker, GameModule
+from stream_director.stimulus import Stimulus
+from stream_director.games.base import ActiveGameTracker, GameModule
 
 
 def test_stimulus_game_defaults_empty():

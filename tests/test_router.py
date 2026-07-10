@@ -1,10 +1,10 @@
 import pytest
 
-from wot_ai_commentator.chat.router import ChatRouter
-from wot_ai_commentator.chat.twitch import parse_privmsg
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.db import WhitelistDB
-from wot_ai_commentator.events import Priority
+from stream_director.chat.router import ChatRouter
+from stream_director.chat.twitch import parse_privmsg
+from stream_director.config import Settings
+from stream_director.db import ChatUserDB
+from stream_director.stimulus import Priority
 
 
 class FakeDirector:
@@ -17,7 +17,7 @@ class FakeDirector:
 
 @pytest.fixture
 def env(tmp_path):
-    db = WhitelistDB(tmp_path / "wl.db")
+    db = ChatUserDB(tmp_path / "wl.db")
     director = FakeDirector()
     settings = Settings(user_cooldown_s=60.0)
     router = ChatRouter(db, director, settings)

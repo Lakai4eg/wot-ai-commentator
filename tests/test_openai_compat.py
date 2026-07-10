@@ -1,10 +1,10 @@
 import httpx
 import pytest
 
-from wot_ai_commentator.commentary.gemini import GeminiBackend
-from wot_ai_commentator.commentary.openai_compat import OpenAICompatBackend
-from wot_ai_commentator.commentary.switch import SwitchBackend
-from wot_ai_commentator.config import Settings
+from stream_director.commentary.gemini import GeminiBackend
+from stream_director.commentary.openai_compat import OpenAICompatBackend
+from stream_director.commentary.switch import SwitchBackend
+from stream_director.config import Settings
 
 
 def make_backend(handler, base_url="https://api.groq.com/openai/v1", api_key="test-key"):

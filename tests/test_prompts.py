@@ -1,9 +1,9 @@
 import random
 
-from wot_ai_commentator.commentary.prompts import build_prompt
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.games.wot.module import build_module as build_wot
+from stream_director.commentary.prompts import build_prompt
+from stream_director.config import Settings
+from stream_director.stimulus import Priority, Stimulus
+from stream_director.games.wot.module import build_module as build_wot
 
 MODULE = build_wot(Settings(), submit=lambda s: None)
 

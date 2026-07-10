@@ -1,4 +1,4 @@
-from wot_ai_commentator.chat.commands import parse_command
+from stream_director.chat.commands import parse_command
 
 
 def test_dir_with_text():

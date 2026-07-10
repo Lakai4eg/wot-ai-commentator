@@ -2,7 +2,7 @@
 import httpx
 import pytest
 
-from wot_ai_commentator.commentary.gemini import GeminiBackend
+from stream_director.commentary.gemini import GeminiBackend
 
 
 def make_backend(handler):

@@ -1,5 +1,5 @@
 # tests/test_lol_client.py
-from wot_ai_commentator.games.lol.client import LiveClientPoller
+from stream_director.games.lol.client import LiveClientPoller
 
 
 def test_initial_status_waiting():

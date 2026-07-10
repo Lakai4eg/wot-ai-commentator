@@ -1,7 +1,7 @@
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.events import Stimulus
-from wot_ai_commentator.games.lol.flavor import describe_event, fallback_line, flavor_lines
-from wot_ai_commentator.games.lol.module import build_module
+from stream_director.config import Settings
+from stream_director.stimulus import Stimulus
+from stream_director.games.lol.flavor import describe_event, fallback_line, flavor_lines
+from stream_director.games.lol.module import build_module
 
 LOL_TYPES = ("battle_start", "frag", "death", "assist", "multikill", "first_blood",
              "objective", "turret", "inhib", "ace", "battle_result")

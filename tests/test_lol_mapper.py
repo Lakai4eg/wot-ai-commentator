@@ -1,8 +1,8 @@
 # tests/test_lol_mapper.py
 import time
 
-from wot_ai_commentator.events import Priority
-from wot_ai_commentator.games.lol.mapper import LolMapper
+from stream_director.stimulus import Priority
+from stream_director.games.lol.mapper import LolMapper
 
 ME = "Streamer#RU1"
 ENEMY = "Enemy#EU1"

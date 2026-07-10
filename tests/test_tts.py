@@ -1,6 +1,6 @@
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.events import Priority
-from wot_ai_commentator.tts import VOICES, pick_voice
+from stream_director.config import Settings
+from stream_director.stimulus import Priority
+from stream_director.tts import VOICES, pick_voice
 
 
 def test_default_when_no_rules():
@@ -43,7 +43,7 @@ def test_all_voices_known():
     assert "baya" in VOICES and "random" in VOICES
 
 
-from wot_ai_commentator.tts import SileroTTS
+from stream_director.tts import SileroTTS
 
 
 def test_synth_none_when_unavailable_any_voice():
@@ -58,6 +58,6 @@ def test_synth_none_when_unavailable_any_voice():
 def test_ctor_clamps_unknown_default_voice():
     tts = SileroTTS.__new__(SileroTTS)
     # emulate the validation the ctor performs
-    from wot_ai_commentator.tts import VOICES
+    from stream_director.tts import VOICES
     voice = "weird"
     assert (voice if voice in VOICES else "baya") == "baya"

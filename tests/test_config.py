@@ -1,6 +1,6 @@
 import json
 
-from wot_ai_commentator.config import Settings, load_settings, save_settings
+from stream_director.config import Settings, load_settings, save_settings
 
 
 def test_load_missing_file_returns_defaults(tmp_path):

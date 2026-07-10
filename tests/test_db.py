@@ -1,11 +1,11 @@
 import pytest
 
-from wot_ai_commentator.db import WhitelistDB
+from stream_director.db import ChatUserDB
 
 
 @pytest.fixture
 def db(tmp_path):
-    d = WhitelistDB(tmp_path / "wl.db")
+    d = ChatUserDB(tmp_path / "wl.db")
     yield d
     d.close()
 

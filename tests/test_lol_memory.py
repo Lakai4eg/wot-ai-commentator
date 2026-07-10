@@ -1,5 +1,5 @@
-from wot_ai_commentator.events import Stimulus
-from wot_ai_commentator.games.lol.memory import LolSessionMemory
+from stream_director.stimulus import Stimulus
+from stream_director.games.lol.memory import LolSessionMemory
 
 
 def game(type_, **payload):

@@ -1,7 +1,7 @@
 import time
 
-from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.games.wot.memory import SessionMemory
+from stream_director.stimulus import Priority, Stimulus
+from stream_director.games.wot.memory import WotSessionMemory
 
 
 def ev(type_, **payload):
@@ -9,7 +9,7 @@ def ev(type_, **payload):
 
 
 def test_repeated_killer_counted_with_fact():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("death", killer="арта"))
     m.register(ev("death", killer="арта"))
     facts = m.register(ev("death", killer="арта"))
@@ -19,14 +19,14 @@ def test_repeated_killer_counted_with_fact():
 
 
 def test_damage_record_only_increases():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("damage_record", damage=3000))
     m.register(ev("damage_record", damage=2000))
     assert m.damage_record == 3000
 
 
 def test_battle_results():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("battle_result", outcome="win"))
     m.register(ev("battle_result", outcome="loss"))
     assert m.battles == 2
@@ -34,7 +34,7 @@ def test_battle_results():
 
 
 def test_summary_lines_after_events():
-    m = SessionMemory()
+    m = WotSessionMemory()
     assert m.summary_lines() == []
     m.register(ev("frag"))
     m.register(ev("death", killer="ваншот"))
@@ -43,7 +43,7 @@ def test_summary_lines_after_events():
 
 
 def test_damage_totals_accumulate_in_both_scopes():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("damage_dealt", amount=364, target="Шторм"))
     m.register(ev("damage_dealt", amount=700, target="Tiger II"))
     m.register(ev("damage_received", amount=499, source="Rhm.-B. WT"))
@@ -56,7 +56,7 @@ def test_damage_totals_accumulate_in_both_scopes():
 
 def test_battle_scope_resets_session_survives():
     """battle_start обнуляет боевые счётчики, сессионные остаются."""
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("damage_dealt", amount=800, target="X"))
     m.register(ev("frag", target="X"))
     m.register(ev("battle_result", outcome="win", silent=True))
@@ -71,7 +71,7 @@ def test_battle_scope_resets_session_survives():
 
 
 def test_crit_and_spotted_counters():
-    m = SessionMemory()
+    m = WotSessionMemory()
     for _ in range(3):
         m.register(ev("crit"))
     m.register(ev("spotted"))
@@ -84,7 +84,7 @@ def test_crit_and_spotted_counters():
 
 
 def test_assist_and_blocked_accumulate():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("assist", amount=250))
     m.register(ev("assist", amount=800))
     m.register(ev("blocked", amount=400))
@@ -98,7 +98,7 @@ def test_assist_and_blocked_accumulate():
 
 
 def test_fire_fact_per_battle():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("fire"))
     facts = m.register(ev("fire"))
     assert m.fires == 2
@@ -110,20 +110,20 @@ def test_fire_fact_per_battle():
 
 
 def test_low_hp_counter():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("low_hp", silent=True))
     m.register(ev("low_hp", silent=True))
     assert m.low_hp_events == 2
 
 
 def test_damage_milestone_fact():
-    m = SessionMemory()
+    m = WotSessionMemory()
     facts = m.register(ev("damage_milestone", total=2000))
     assert any("2000" in f for f in facts)
 
 
 def test_battle_start_and_vehicle_change_update_battle_context():
-    m = SessionMemory()
+    m = WotSessionMemory()
     m.register(ev("vehicle_change", tank="T-54"))
     m.register(ev("battle_start", map="Химельсдорф", mode="standard"))
     assert m.battle.map == "Химельсдорф"

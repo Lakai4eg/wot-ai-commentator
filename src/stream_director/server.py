@@ -5,101 +5,40 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .commentary.gemini import GeminiBackend
+from .broadcast import OverlayBroadcaster
 from .commentary.switch import SwitchBackend
 from .config import Settings, save_settings
-from .db import ROLES, WhitelistDB
+from .db import ROLES, ChatUserDB
 from .director import Director
-from .events import Stimulus
 from .games.base import ActiveGameTracker
-from .tts import VOICES, AudioStore, SileroTTS, pick_voice
+from .tts import VOICES
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class AppContext:
+    """Собранные зависимости приложения — то, что нужно эндпоинтам."""
+
     settings: Settings
     settings_path: Path
-    db: WhitelistDB
+    db: ChatUserDB
     director: Director
+    broadcaster: OverlayBroadcaster
     tracker: ActiveGameTracker | None = None
-    backend: SwitchBackend | GeminiBackend | None = None
-    audio: AudioStore = field(default_factory=AudioStore)
-    tts: SileroTTS | None = None
-    replica_counter: int = 0
+    backend: SwitchBackend | None = None
     statuses: dict[str, Any] = field(default_factory=dict)
-    ws_clients: set[WebSocket] = field(default_factory=set)
-
-    async def publish(self, text: str, stimulus: Stimulus) -> None:
-        """Колбэк директора: реплика → все WS-клиенты (+ озвучка)."""
-        self.replica_counter += 1
-        replica_id = self.replica_counter
-        message: dict[str, Any] = {
-            "type": "replica",
-            "id": replica_id,
-            "text": text if self.settings.text_enabled else "",
-            "effect": stimulus.type,
-        }
-        # Текст уходит сразу; озвучка догоняет отдельным сообщением — но только
-        # если реплика не запоздала (см. _voice_fresh).
-        voice_on = (
-            self.settings.voice_enabled
-            and self._voice_fresh(stimulus)
-            and self.tts is not None
-            and self.tts.available
-        )
-        if voice_on:
-            voice = pick_voice(self.settings, stimulus.type, stimulus.priority)
-            asyncio.get_running_loop().create_task(
-                self._send_audio(replica_id, text, voice)
-            )
-        elif not self.settings.text_enabled:
-            return
-        dead = []
-        for ws in list(self.ws_clients):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.ws_clients.discard(ws)
-
-    def _voice_fresh(self, stimulus: Stimulus) -> bool:
-        """Голос уместен, только пока событие свежее tts_max_age_s.
-
-        TTS синтезируется с задержкой (очередь, генерация, сеть); если событие
-        успело устареть, озвучивать реакцию поздно — текст всё равно покажем.
-        """
-        return time.time() - stimulus.created_at <= self.settings.tts_max_age_s
-
-    async def _send_audio(self, replica_id: int, text: str, voice: str) -> None:
-        try:
-            wav = await asyncio.to_thread(self.tts.synth, text, voice)
-        except Exception:
-            return
-        if not wav:
-            return
-        message = {
-            "type": "audio",
-            "replica_id": replica_id,
-            "audio_url": f"/api/audio/{self.audio.put(wav)}",
-        }
-        for ws in list(self.ws_clients):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                self.ws_clients.discard(ws)
+    # Свежая диагностика по запросу /api/status — вместо фонового полла.
+    refresh_status: Callable[[], None] | None = None
 
 
 class UserIn(BaseModel):
@@ -143,7 +82,7 @@ def _masked_settings(s: Settings) -> dict:
 
 
 def create_app(ctx: AppContext) -> FastAPI:
-    app = FastAPI(title="WoT AI Commentator")
+    app = FastAPI(title="Stream Director")
 
     @app.get("/api/settings")
     async def get_settings():
@@ -154,30 +93,20 @@ def create_app(ctx: AppContext) -> FastAPI:
         data = patch.model_dump(exclude_none=True)
         if "llm_provider" in data and data["llm_provider"] not in ("gemini", "openai"):
             raise HTTPException(400, "llm_provider must be 'gemini' or 'openai'")
+        # Маска из GET («••••••••») — не настоящий ключ: молча игнорируем,
+        # чтобы случайный PUT маски не затёр сохранённый ключ.
+        for key in ("gemini_api_key", "openai_api_key"):
+            value = data.get(key)
+            if value and set(value) == {"•"}:
+                data.pop(key)
+        for key in ("global_cooldown_s", "debounce_s", "debounce_max_s",
+                    "user_cooldown_s", "tts_max_age_s"):
+            if key in data and data[key] < 0:
+                raise HTTPException(400, f"{key} must be >= 0")
         for key, value in data.items():
             setattr(ctx.settings, key, value)
         if ctx.backend is not None:
-            gemini = getattr(ctx.backend, "gemini", ctx.backend)
-            openai = getattr(ctx.backend, "openai", None)
-            if "gemini_api_key" in data:
-                gemini.api_key = data["gemini_api_key"]
-                gemini.last_error = None
-            if "gemini_model" in data:
-                gemini.model = data["gemini_model"]
-            if openai is not None:
-                if "openai_base_url" in data:
-                    openai.base_url = data["openai_base_url"]
-                    openai.last_error = None
-                if "openai_api_key" in data:
-                    openai.api_key = data["openai_api_key"]
-                    openai.last_error = None
-                if "openai_model" in data:
-                    openai.model = data["openai_model"]
-            # Статус LLM обновляем сразу, не дожидаясь status_loop (2 с).
-            ctx.statuses["llm_provider"] = ctx.settings.llm_provider
-            if hasattr(ctx.backend, "configured"):
-                ctx.statuses["llm_configured"] = ctx.backend.configured
-            ctx.statuses["llm_last_error"] = ctx.backend.last_error
+            ctx.backend.apply(data)
         save_settings(ctx.settings, ctx.settings_path)
         return _masked_settings(ctx.settings)
 
@@ -213,20 +142,23 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.get("/api/status")
     async def status():
+        if ctx.refresh_status is not None:
+            ctx.refresh_status()
         active = ctx.tracker.active if ctx.tracker else "wot"
-        module = ctx.director.games.get(active) if ctx.director else None
+        module = ctx.director.games.get(active)
+        tts = ctx.broadcaster.tts
         return {
             **ctx.statuses,
             "active_game": active,
-            "overlay_clients": len(ctx.ws_clients),
+            "overlay_clients": len(ctx.broadcaster.ws_clients),
             "director": ctx.director.stats(),
-            "tts": bool(ctx.tts and ctx.tts.available),
+            "tts": bool(tts and tts.available),
             "memory": module.memory.summary_lines() if module else [],
         }
 
     @app.get("/api/audio/{audio_id}")
     async def get_audio(audio_id: str):
-        wav = ctx.audio.get(audio_id)
+        wav = ctx.broadcaster.audio.get(audio_id)
         if wav is None:
             raise HTTPException(404, "audio not found")
         return Response(content=wav, media_type="audio/wav")
@@ -237,10 +169,11 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.post("/api/tts/preview")
     async def preview_voice(body: PreviewIn):
-        if ctx.tts is None or not ctx.tts.available:
+        tts = ctx.broadcaster.tts
+        if tts is None or not tts.available:
             raise HTTPException(503, "TTS недоступен")
         text = (body.text or "").strip() or "Проверка голоса. Раз, два, три."
-        wav = await asyncio.to_thread(ctx.tts.synth, text, body.voice)
+        wav = await asyncio.to_thread(tts.synth, text, body.voice)
         if not wav:
             raise HTTPException(503, "не удалось синтезировать")
         return Response(content=wav, media_type="audio/wav")
@@ -248,14 +181,14 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.websocket("/ws/overlay")
     async def ws_overlay(ws: WebSocket):
         await ws.accept()
-        ctx.ws_clients.add(ws)
+        ctx.broadcaster.ws_clients.add(ws)
         try:
             while True:
                 await ws.receive_text()  # ping от клиента / держим соединение
         except WebSocketDisconnect:
             pass
         finally:
-            ctx.ws_clients.discard(ws)
+            ctx.broadcaster.ws_clients.discard(ws)
 
     dist = Path(__file__).parent.parent.parent / "web" / "dist"
     if dist.is_dir():

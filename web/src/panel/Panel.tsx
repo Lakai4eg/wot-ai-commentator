@@ -82,7 +82,7 @@ export function Panel() {
   return (
     <div className="panel">
       <h1>
-        WoT AI Commentator
+        Stream Director
         <span className="badges">
           <Badge
             label={status.active_game === "wot" ? "WoT ●" : "WoT"}

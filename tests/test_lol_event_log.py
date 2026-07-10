@@ -1,6 +1,6 @@
 import json
 
-from wot_ai_commentator.games.lol.event_log import LolEventLog, NullEventLog
+from stream_director.games.lol.event_log import LolEventLog, NullEventLog
 
 
 def _lines(path):

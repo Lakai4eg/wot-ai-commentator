@@ -1,4 +1,4 @@
-# WoT AI Commentator
+# Stream Director
 
 AI-режиссёр стрима для «Мира танков» и League of Legends: получает события боя
 из мода [wotstat-data-provider](https://github.com/wotstat/wotstat-data-provider)
@@ -20,7 +20,7 @@ AI-режиссёр стрима для «Мира танков» и League of L
    (из РФ нужен маршрут до `generativelanguage.googleapis.com` — VPN/pbr).
 4. **Запуск**:
    ```bash
-   python -m wot_ai_commentator
+   python -m stream_director
    ```
 5. **Панель** http://127.0.0.1:8710/panel — вставь API-ключ Gemini (провайдер
    «Gemini» выбран по умолчанию), укажи канал Twitch. После сохранения ключа

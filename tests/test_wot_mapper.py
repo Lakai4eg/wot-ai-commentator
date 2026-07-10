@@ -1,6 +1,6 @@
-"""Таблица «сообщение WotStat → ожидаемый стимул» для EventMapper.
+"""Таблица «сообщение WotStat → ожидаемый стимул» для WotMapper.
 
-FakeClient повторяет duck-typed интерфейс DataProviderClient (get/subscribe/
+FakeClient повторяет duck-typed интерфейс WotStatClient (get/subscribe/
 on_trigger) из спеки §3, но без сети: тест сам «толкает» состояния (`set_state`)
 и триггеры (`fire`), а маппер отдаёт стимулы в собранный список `emitted`.
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from wot_ai_commentator.events import Priority
-from wot_ai_commentator.games.wot.mapper import EventMapper
+from stream_director.stimulus import Priority
+from stream_director.games.wot.mapper import WotMapper
 
 MY_ID = 42
 MY_TEAM = 1
@@ -76,7 +76,7 @@ def wired():
         }
     )
     emitted: list = []
-    mapper = EventMapper(client, emitted.append)
+    mapper = WotMapper(client, emitted.append)
     return client, mapper, emitted
 
 

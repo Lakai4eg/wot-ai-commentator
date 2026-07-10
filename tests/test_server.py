@@ -5,13 +5,17 @@ import time
 import httpx
 import pytest
 
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.db import WhitelistDB
-from wot_ai_commentator.director import Director
-from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.games.base import ActiveGameTracker
-from wot_ai_commentator.games.wot.module import build_module as build_wot
-from wot_ai_commentator.server import AppContext, create_app
+from stream_director.broadcast import OverlayBroadcaster
+from stream_director.commentary.gemini import GeminiBackend
+from stream_director.commentary.openai_compat import OpenAICompatBackend
+from stream_director.commentary.switch import SwitchBackend
+from stream_director.config import Settings
+from stream_director.db import ChatUserDB
+from stream_director.director import Director
+from stream_director.stimulus import Priority, Stimulus
+from stream_director.games.base import ActiveGameTracker
+from stream_director.games.wot.module import build_module as build_wot
+from stream_director.server import AppContext, create_app
 
 
 class FakeBackend:
@@ -24,17 +28,19 @@ class FakeBackend:
 @pytest.fixture
 def ctx(tmp_path):
     settings = Settings()
-    db = WhitelistDB(tmp_path / "wl.db")
+    db = ChatUserDB(tmp_path / "wl.db")
     tracker = ActiveGameTracker()
+    broadcaster = OverlayBroadcaster(settings)
+    director = Director(settings, FakeBackend(), broadcaster.publish, tracker)
+    director.register(build_wot(settings, submit=lambda s: None))
     c = AppContext(
         settings=settings,
         settings_path=tmp_path / "settings.json",
         db=db,
-        director=None,
+        director=director,
+        broadcaster=broadcaster,
         tracker=tracker,
     )
-    c.director = Director(settings, FakeBackend(), c.publish, tracker)
-    c.director.register(build_wot(settings, submit=lambda s: None))
     yield c
     db.close()
 
@@ -108,6 +114,59 @@ async def test_api_key_masked(client, ctx):
 
 
 @pytest.mark.asyncio
+async def test_masked_key_put_does_not_overwrite(client, ctx):
+    """PUT маски из GET («••••••••») не затирает сохранённый ключ."""
+    ctx.settings.gemini_api_key = "secret-key"
+    r = await client.put("/api/settings", json={"gemini_api_key": "•" * 8})
+    assert r.status_code == 200
+    assert ctx.settings.gemini_api_key == "secret-key"
+    # Пустая строка — легальный способ стереть ключ.
+    r = await client.put("/api/settings", json={"gemini_api_key": ""})
+    assert r.status_code == 200
+    assert ctx.settings.gemini_api_key == ""
+
+
+@pytest.mark.asyncio
+async def test_negative_timings_rejected(client, ctx):
+    r = await client.put("/api/settings", json={"global_cooldown_s": -1.0})
+    assert r.status_code == 400
+    assert ctx.settings.global_cooldown_s == Settings().global_cooldown_s
+
+
+@pytest.mark.asyncio
+async def test_put_settings_applies_to_backend(client, ctx):
+    """PUT донастраивает провайдеров через SwitchBackend.apply, не через внутренности."""
+    backend = SwitchBackend(ctx.settings, GeminiBackend(""), OpenAICompatBackend())
+    backend.gemini.last_error = "HTTP 401"
+    ctx.backend = backend
+    r = await client.put("/api/settings", json={
+        "gemini_api_key": "k1",
+        "openai_base_url": "https://api.example/v1",
+        "openai_model": "m1",
+    })
+    assert r.status_code == 200
+    assert backend.gemini.api_key == "k1"
+    assert backend.gemini.last_error is None  # новый ключ — старая ошибка неактуальна
+    assert backend.openai.base_url == "https://api.example/v1"
+    assert backend.openai.model == "m1"
+
+
+@pytest.mark.asyncio
+async def test_status_refreshed_on_demand(client, ctx):
+    """GET /api/status зовёт refresh_status — фоновый полл больше не нужен."""
+    calls = []
+
+    def refresh():
+        calls.append(1)
+        ctx.statuses["chat"] = "connected"
+
+    ctx.refresh_status = refresh
+    body = (await client.get("/api/status")).json()
+    assert calls == [1]
+    assert body["chat"] == "connected"
+
+
+@pytest.mark.asyncio
 async def test_llm_test_endpoint(client, ctx):
     class ProbeBackend:
         last_error = None
@@ -163,8 +222,8 @@ def test_voice_fresh_gate(ctx):
     ctx.settings.tts_max_age_s = 20.0
     fresh = Stimulus(kind="game_event", type="frag")
     stale = Stimulus(kind="game_event", type="frag", created_at=time.time() - 100)
-    assert ctx._voice_fresh(fresh) is True
-    assert ctx._voice_fresh(stale) is False
+    assert ctx.broadcaster._voice_fresh(fresh) is True
+    assert ctx.broadcaster._voice_fresh(stale) is False
 
 
 @pytest.mark.asyncio
@@ -178,22 +237,24 @@ async def test_stale_event_skips_voice(ctx):
 
     ctx.settings.voice_enabled = True
     ctx.settings.tts_max_age_s = 20.0
-    ctx.tts = FakeTTS()
+    ctx.broadcaster.tts = FakeTTS()
 
     voiced: list[tuple[str, str]] = []
 
     async def record(replica_id, text, voice):
         voiced.append((text, voice))
 
-    ctx._send_audio = record  # перехватываем факт озвучки
+    ctx.broadcaster._send_audio = record  # перехватываем факт озвучки
 
     ctx.settings.voice_by_priority = {"high": "aidar"}
-    await ctx.publish("свежая", Stimulus(kind="game_event", type="frag", priority=Priority.HIGH))
+    await ctx.broadcaster.publish(
+        "свежая", Stimulus(kind="game_event", type="frag", priority=Priority.HIGH)
+    )
     await asyncio.sleep(0)  # даём фоновой задаче озвучки стартовать
     assert voiced == [("свежая", "aidar")]
 
     voiced.clear()
-    await ctx.publish(
+    await ctx.broadcaster.publish(
         "запоздавшая",
         Stimulus(kind="game_event", type="frag", created_at=time.time() - 100),
     )
@@ -203,7 +264,7 @@ async def test_stale_event_skips_voice(ctx):
 
 @pytest.mark.asyncio
 async def test_audio_roundtrip(client, ctx):
-    audio_id = ctx.audio.put(b"RIFFfake")
+    audio_id = ctx.broadcaster.audio.put(b"RIFFfake")
     r = await client.get(f"/api/audio/{audio_id}")
     assert r.status_code == 200
     assert r.content == b"RIFFfake"
@@ -237,7 +298,7 @@ async def test_voices_list(client):
 
 @pytest.mark.asyncio
 async def test_preview_503_without_tts(client, ctx):
-    ctx.tts = None
+    ctx.broadcaster.tts = None
     r = await client.post("/api/tts/preview", json={"voice": "aidar"})
     assert r.status_code == 503
 
@@ -250,7 +311,7 @@ async def test_preview_returns_wav(client, ctx):
         def synth(self, text, voice=None):
             return b"RIFFfake"
 
-    ctx.tts = FakeTTS()
+    ctx.broadcaster.tts = FakeTTS()
     r = await client.post("/api/tts/preview", json={"voice": "aidar"})
     assert r.status_code == 200
     assert r.content == b"RIFFfake"

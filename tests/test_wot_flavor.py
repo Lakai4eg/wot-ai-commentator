@@ -1,7 +1,7 @@
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.games.wot.flavor import describe_event, fallback_line, flavor_lines
-from wot_ai_commentator.games.wot.module import build_module
+from stream_director.config import Settings
+from stream_director.stimulus import Priority, Stimulus
+from stream_director.games.wot.flavor import describe_event, fallback_line, flavor_lines
+from stream_director.games.wot.module import build_module
 
 WOT_TYPES = (
     "frag", "death", "ammo_rack", "oneshot", "damage_record", "battle_result",

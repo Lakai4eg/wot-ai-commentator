@@ -2,11 +2,11 @@ import time
 
 import pytest
 
-from wot_ai_commentator.config import Settings
-from wot_ai_commentator.director import Director
-from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.games.base import ActiveGameTracker
-from wot_ai_commentator.games.wot.module import build_module as build_wot
+from stream_director.config import Settings
+from stream_director.director import Director
+from stream_director.stimulus import Priority, Stimulus
+from stream_director.games.base import ActiveGameTracker
+from stream_director.games.wot.module import build_module as build_wot
 
 
 class FakeBackend:
@@ -141,6 +141,17 @@ async def test_debounce_bypassed_for_chat_order():
 
 
 @pytest.mark.asyncio
+async def test_replica_times_pruned_to_last_minute():
+    """Метки реплик старше минуты вычищаются — список не растёт весь стрим."""
+    d, _ = make_director()
+    d._replica_times = [time.time() - 120.0] * 50  # накопленный «хвост»
+    d.submit(game("frag"))
+    await drain(d)
+    assert len(d._replica_times) == 1
+    assert d.stats()["replicas_last_minute"] == 1
+
+
+@pytest.mark.asyncio
 async def test_expired_stimulus_dropped():
     d, published = make_director()
     stale = game("frag")
@@ -242,7 +253,7 @@ async def test_unknown_game_falls_back_to_active():
     assert len(published) == 1  # не упали, обработали активным модулем
 
 
-from wot_ai_commentator.games.lol.module import build_module as build_lol
+from stream_director.games.lol.module import build_module as build_lol
 
 
 @pytest.mark.asyncio

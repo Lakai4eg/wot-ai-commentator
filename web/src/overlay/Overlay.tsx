@@ -12,6 +12,11 @@ function displayMs(text: string): number {
   return Math.min(4000 + text.length * 55, 12000);
 }
 
+// Плашка висит до 12с — без лимита очередь в бурный момент уезжает от игры
+// на минуты. Лишнее дропаем с головы: свежая реплика важнее залежавшейся.
+const MAX_QUEUE = 3;
+const MAX_AUDIO_QUEUE = 3;
+
 export function Overlay() {
   const [current, setCurrent] = useState<Replica | null>(null);
   const queueRef = useRef<Replica[]>([]);
@@ -67,11 +72,13 @@ export function Overlay() {
           // приходит позже своего текста) — ставим в очередь и играем
           // по порядку, не перекрывая предыдущий трек
           audioQueueRef.current.push(msg.audio_url);
+          while (audioQueueRef.current.length > MAX_AUDIO_QUEUE) audioQueueRef.current.shift();
           if (!audioBusyRef.current) playNextAudio();
           return;
         }
         if (msg.type !== "replica") return;
         queueRef.current.push({ ...msg, serverId: msg.id, id: ++idRef.current });
+        while (queueRef.current.length > MAX_QUEUE) queueRef.current.shift();
         if (!busyRef.current) playNext();
       };
       ws.onopen = () => {

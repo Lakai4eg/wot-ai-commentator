@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wot-ai-commentator"
+name = "stream-director"
 version = "0.1.0"
 description = "AI-режиссёр стрима: видит игру, комментирует и развлекает зрителей"
 requires-python = ">=3.12"

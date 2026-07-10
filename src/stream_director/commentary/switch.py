@@ -35,6 +35,26 @@ class SwitchBackend:
     def last_error(self, value: str | None) -> None:
         self.active.last_error = value
 
+    def apply(self, data: dict) -> None:
+        """Применить изменённые настройки к провайдерам (ключи/модели/URL).
+
+        Смена ключа или адреса сбрасывает last_error — прежняя ошибка
+        относилась к старым реквизитам.
+        """
+        if "gemini_api_key" in data:
+            self.gemini.api_key = data["gemini_api_key"]
+            self.gemini.last_error = None
+        if "gemini_model" in data:
+            self.gemini.model = data["gemini_model"]
+        if "openai_base_url" in data:
+            self.openai.base_url = data["openai_base_url"]
+            self.openai.last_error = None
+        if "openai_api_key" in data:
+            self.openai.api_key = data["openai_api_key"]
+            self.openai.last_error = None
+        if "openai_model" in data:
+            self.openai.model = data["openai_model"]
+
     async def generate(self, prompt: str) -> str | None:
         return await self.active.generate(prompt)
 
