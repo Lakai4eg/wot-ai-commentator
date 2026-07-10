@@ -21,6 +21,7 @@ export interface SettingsDto {
   debounce_s: number;
   debounce_max_s: number;
   user_cooldown_s: number;
+  tts_max_age_s: number;
 }
 
 export interface StatusDto {

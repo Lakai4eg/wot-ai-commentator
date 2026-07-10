@@ -38,6 +38,10 @@ class Settings:
     lol_url: str = "https://127.0.0.1:2999"
     server_port: int = 8710
     reply_timeout_s: float = 4.0
+    # Голос не догоняет: если с момента события прошло больше tts_max_age_s,
+    # реплику показываем текстом, но не озвучиваем (устаревшая реакция в эфире
+    # звучит нелепо). Текст оверлея это не трогает.
+    tts_max_age_s: float = 20.0
 
 
 def load_settings(path: str | Path) -> Settings:

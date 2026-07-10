@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -50,8 +51,15 @@ class AppContext:
             "text": text if self.settings.text_enabled else "",
             "effect": stimulus.type,
         }
-        # Текст уходит сразу; озвучка догоняет отдельным сообщением.
-        if self.settings.voice_enabled and self.tts is not None and self.tts.available:
+        # Текст уходит сразу; озвучка догоняет отдельным сообщением — но только
+        # если реплика не запоздала (см. _voice_fresh).
+        voice_on = (
+            self.settings.voice_enabled
+            and self._voice_fresh(stimulus)
+            and self.tts is not None
+            and self.tts.available
+        )
+        if voice_on:
             asyncio.get_running_loop().create_task(self._send_audio(replica_id, text))
         elif not self.settings.text_enabled:
             return
@@ -63,6 +71,14 @@ class AppContext:
                 dead.append(ws)
         for ws in dead:
             self.ws_clients.discard(ws)
+
+    def _voice_fresh(self, stimulus: Stimulus) -> bool:
+        """Голос уместен, только пока событие свежее tts_max_age_s.
+
+        TTS синтезируется с задержкой (очередь, генерация, сеть); если событие
+        успело устареть, озвучивать реакцию поздно — текст всё равно покажем.
+        """
+        return time.time() - stimulus.created_at <= self.settings.tts_max_age_s
 
     async def _send_audio(self, replica_id: int, text: str) -> None:
         try:
@@ -103,6 +119,7 @@ class SettingsIn(BaseModel):
     debounce_s: float | None = None
     debounce_max_s: float | None = None
     user_cooldown_s: float | None = None
+    tts_max_age_s: float | None = None
 
 
 def _masked_settings(s: Settings) -> dict:

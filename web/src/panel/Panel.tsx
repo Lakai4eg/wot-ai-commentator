@@ -198,6 +198,17 @@ export function Panel() {
             Чат-команды
           </label>
         </div>
+        <label>
+          Не озвучивать реплики старше, секунд (текст всё равно покажем)
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={settings.tts_max_age_s}
+            onChange={(e) => setSettings({ ...settings, tts_max_age_s: Number(e.target.value) })}
+            onBlur={(e) => patch({ tts_max_age_s: Number(e.target.value) })}
+          />
+        </label>
         {status.director && (
           <p className="hint">
             очередь: {status.director.queue_len}, реплик за минуту: {status.director.replicas_last_minute}
