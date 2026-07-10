@@ -8,6 +8,7 @@ from ...config import Settings
 from ...events import Stimulus
 from ..base import GameModule
 from .client import LiveClientPoller
+from .event_log import LolEventLog
 from .flavor import describe_event, fallback_line, flavor_lines
 from .mapper import LolMapper
 from .memory import LolSessionMemory
@@ -18,7 +19,7 @@ def build_module(
     submit: Callable[[Stimulus], None],
     on_live: Callable[[], None] | None = None,
 ) -> GameModule:
-    mapper = LolMapper(submit=submit)
+    mapper = LolMapper(submit=submit, event_log=LolEventLog())
     client = LiveClientPoller(
         getattr(settings, "lol_url", "https://127.0.0.1:2999"),
         on_payload=mapper.handle_payload,
