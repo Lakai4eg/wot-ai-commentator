@@ -47,3 +47,21 @@ def test_new_defaults_after_ocr_removal():
 
 def test_lol_url_default():
     assert Settings().lol_url == "https://127.0.0.1:2999"
+
+
+def test_voice_defaults():
+    s = Settings()
+    assert s.default_voice == "baya"
+    assert s.voice_by_priority == {}
+    assert s.voice_overrides == {}
+
+
+def test_voice_fields_roundtrip(tmp_path):
+    path = tmp_path / "settings.json"
+    s = Settings(
+        default_voice="xenia",
+        voice_by_priority={"high": "aidar", "critical": "kseniya"},
+        voice_overrides={"death": "eugene"},
+    )
+    save_settings(s, path)
+    assert load_settings(path) == s

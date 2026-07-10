@@ -70,7 +70,7 @@ async def run() -> None:
 
     # TTS: загрузка модели в фоне, не блокируя старт
     def load_tts() -> None:
-        tts = SileroTTS()
+        tts = SileroTTS(voice=settings.default_voice)
         ctx.tts = tts
         ctx.statuses["tts_status"] = "ready" if tts.available else "unavailable"
 

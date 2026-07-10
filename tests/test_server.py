@@ -8,7 +8,7 @@ import pytest
 from wot_ai_commentator.config import Settings
 from wot_ai_commentator.db import WhitelistDB
 from wot_ai_commentator.director import Director
-from wot_ai_commentator.events import Stimulus
+from wot_ai_commentator.events import Priority, Stimulus
 from wot_ai_commentator.games.base import ActiveGameTracker
 from wot_ai_commentator.games.wot.module import build_module as build_wot
 from wot_ai_commentator.server import AppContext, create_app
@@ -173,23 +173,24 @@ async def test_stale_event_skips_voice(ctx):
     class FakeTTS:
         available = True
 
-        def synth(self, text):
+        def synth(self, text, voice=None):
             return b"RIFFfake"
 
     ctx.settings.voice_enabled = True
     ctx.settings.tts_max_age_s = 20.0
     ctx.tts = FakeTTS()
 
-    voiced: list[str] = []
+    voiced: list[tuple[str, str]] = []
 
-    async def record(replica_id, text):
-        voiced.append(text)
+    async def record(replica_id, text, voice):
+        voiced.append((text, voice))
 
     ctx._send_audio = record  # перехватываем факт озвучки
 
-    await ctx.publish("свежая", Stimulus(kind="game_event", type="frag"))
+    ctx.settings.voice_by_priority = {"high": "aidar"}
+    await ctx.publish("свежая", Stimulus(kind="game_event", type="frag", priority=Priority.HIGH))
     await asyncio.sleep(0)  # даём фоновой задаче озвучки стартовать
-    assert voiced == ["свежая"]
+    assert voiced == [("свежая", "aidar")]
 
     voiced.clear()
     await ctx.publish(
@@ -207,3 +208,50 @@ async def test_audio_roundtrip(client, ctx):
     assert r.status_code == 200
     assert r.content == b"RIFFfake"
     assert (await client.get("/api/audio/999")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_voice_settings_persist(client, ctx):
+    r = await client.put(
+        "/api/settings",
+        json={
+            "default_voice": "xenia",
+            "voice_by_priority": {"high": "aidar"},
+            "voice_overrides": {"death": "eugene"},
+        },
+    )
+    assert r.status_code == 200
+    assert ctx.settings.default_voice == "xenia"
+    assert ctx.settings.voice_by_priority == {"high": "aidar"}
+    assert ctx.settings.voice_overrides == {"death": "eugene"}
+    body = r.json()
+    assert body["default_voice"] == "xenia"
+
+
+@pytest.mark.asyncio
+async def test_voices_list(client):
+    body = (await client.get("/api/voices")).json()
+    assert "baya" in body["voices"]
+    assert "aidar" in body["voices"]
+
+
+@pytest.mark.asyncio
+async def test_preview_503_without_tts(client, ctx):
+    ctx.tts = None
+    r = await client.post("/api/tts/preview", json={"voice": "aidar"})
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_preview_returns_wav(client, ctx):
+    class FakeTTS:
+        available = True
+
+        def synth(self, text, voice=None):
+            return b"RIFFfake"
+
+    ctx.tts = FakeTTS()
+    r = await client.post("/api/tts/preview", json={"voice": "aidar"})
+    assert r.status_code == 200
+    assert r.content == b"RIFFfake"
+    assert r.headers["content-type"] == "audio/wav"

@@ -23,6 +23,9 @@ export interface SettingsDto {
   debounce_max_s: number;
   user_cooldown_s: number;
   tts_max_age_s: number;
+  default_voice: string;
+  voice_by_priority: Record<string, string>;
+  voice_overrides: Record<string, string>;
 }
 
 export interface StatusDto {
@@ -71,5 +74,15 @@ export const api = {
   testLlm: () =>
     req<{ ok: boolean; reply: string | null; error: string | null }>("/api/llm/test", {
       method: "POST",
+    }),
+  getVoices: () => req<{ voices: string[] }>("/api/voices"),
+  previewVoice: (voice: string) =>
+    fetch("/api/tts/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice }),
+    }).then(async (r) => {
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+      return r.blob();
     }),
 };

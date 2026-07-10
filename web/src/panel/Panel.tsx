@@ -17,6 +17,8 @@ export function Panel() {
   const [newUser, setNewUser] = useState("");
   const [newRole, setNewRole] = useState<"director" | "admin" | "banned">("director");
   const [message, setMessage] = useState("");
+  const [voices, setVoices] = useState<string[]>([]);
+  const [newOverrideType, setNewOverrideType] = useState("");
 
   const refreshUsers = useCallback(() => {
     api.listUsers().then(setUsers).catch(() => {});
@@ -25,6 +27,7 @@ export function Panel() {
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => setMessage("Сервер недоступен"));
     refreshUsers();
+    api.getVoices().then((v) => setVoices(v.voices)).catch(() => {});
     const t = setInterval(() => api.getStatus().then(setStatus).catch(() => {}), 2000);
     return () => clearInterval(t);
   }, [refreshUsers]);
@@ -50,6 +53,16 @@ export function Panel() {
         setMessage("Сохранено");
         setTimeout(() => setMessage(""), 1500);
       }
+    } catch (e) {
+      setMessage(String(e));
+    }
+  };
+
+  const preview = async (voice: string) => {
+    try {
+      const blob = await api.previewVoice(voice);
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.play().catch(() => {});
     } catch (e) {
       setMessage(String(e));
     }
@@ -222,6 +235,98 @@ export function Panel() {
             очередь: {status.director.queue_len}, реплик за минуту: {status.director.replicas_last_minute}
           </p>
         )}
+      </section>
+
+      <section>
+        <h2>Голос</h2>
+        <label>
+          Голос по умолчанию
+          <div className="row">
+            <select
+              value={settings.default_voice}
+              onChange={(e) => patch({ default_voice: e.target.value })}
+            >
+              {voices.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            <button onClick={() => preview(settings.default_voice)}>прослушать</button>
+          </div>
+        </label>
+
+        <p className="hint">Голос по важности события (пусто — как по умолчанию):</p>
+        {(["low", "normal", "high", "critical"] as const).map((p) => (
+          <label key={p} className="check">
+            {p}
+            <div className="row">
+              <select
+                value={settings.voice_by_priority[p] ?? ""}
+                onChange={(e) => {
+                  const next = { ...settings.voice_by_priority };
+                  if (e.target.value) next[p] = e.target.value;
+                  else delete next[p];
+                  patch({ voice_by_priority: next });
+                }}
+              >
+                <option value="">— по умолчанию —</option>
+                {voices.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              {settings.voice_by_priority[p] && (
+                <button onClick={() => preview(settings.voice_by_priority[p])}>прослушать</button>
+              )}
+            </div>
+          </label>
+        ))}
+
+        <p className="hint">
+          Точечно по типу события (напр. death, frag, multikill) — важнее правила по важности:
+        </p>
+        {Object.entries(settings.voice_overrides).map(([type, voice]) => (
+          <div className="row" key={type}>
+            <input value={type} readOnly />
+            <select
+              value={voice}
+              onChange={(e) => {
+                const next = { ...settings.voice_overrides, [type]: e.target.value };
+                patch({ voice_overrides: next });
+              }}
+            >
+              {voices.map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            <button onClick={() => preview(voice)}>прослушать</button>
+            <button
+              className="danger"
+              onClick={() => {
+                const next = { ...settings.voice_overrides };
+                delete next[type];
+                patch({ voice_overrides: next });
+              }}
+            >
+              удалить
+            </button>
+          </div>
+        ))}
+        <div className="row">
+          <input
+            placeholder="тип события (напр. death)"
+            value={newOverrideType}
+            onChange={(e) => setNewOverrideType(e.target.value)}
+          />
+          <button
+            onClick={() => {
+              const t = newOverrideType.trim();
+              if (!t || !voices.length) return;
+              patch({ voice_overrides: { ...settings.voice_overrides, [t]: voices[0] } });
+              setNewOverrideType("");
+            }}
+          >
+            добавить оверрайд
+          </button>
+        </div>
       </section>
 
       <section>

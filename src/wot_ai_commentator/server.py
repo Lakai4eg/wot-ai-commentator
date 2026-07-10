@@ -22,7 +22,7 @@ from .db import ROLES, WhitelistDB
 from .director import Director
 from .events import Stimulus
 from .games.base import ActiveGameTracker
-from .tts import AudioStore, SileroTTS
+from .tts import VOICES, AudioStore, SileroTTS, pick_voice
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +60,10 @@ class AppContext:
             and self.tts.available
         )
         if voice_on:
-            asyncio.get_running_loop().create_task(self._send_audio(replica_id, text))
+            voice = pick_voice(self.settings, stimulus.type, stimulus.priority)
+            asyncio.get_running_loop().create_task(
+                self._send_audio(replica_id, text, voice)
+            )
         elif not self.settings.text_enabled:
             return
         dead = []
@@ -80,9 +83,9 @@ class AppContext:
         """
         return time.time() - stimulus.created_at <= self.settings.tts_max_age_s
 
-    async def _send_audio(self, replica_id: int, text: str) -> None:
+    async def _send_audio(self, replica_id: int, text: str, voice: str) -> None:
         try:
-            wav = await asyncio.to_thread(self.tts.synth, text)
+            wav = await asyncio.to_thread(self.tts.synth, text, voice)
         except Exception:
             return
         if not wav:
@@ -121,6 +124,14 @@ class SettingsIn(BaseModel):
     debounce_max_s: float | None = None
     user_cooldown_s: float | None = None
     tts_max_age_s: float | None = None
+    default_voice: str | None = None
+    voice_by_priority: dict[str, str] | None = None
+    voice_overrides: dict[str, str] | None = None
+
+
+class PreviewIn(BaseModel):
+    voice: str | None = None
+    text: str | None = None
 
 
 def _masked_settings(s: Settings) -> dict:
@@ -218,6 +229,20 @@ def create_app(ctx: AppContext) -> FastAPI:
         wav = ctx.audio.get(audio_id)
         if wav is None:
             raise HTTPException(404, "audio not found")
+        return Response(content=wav, media_type="audio/wav")
+
+    @app.get("/api/voices")
+    async def list_voices():
+        return {"voices": list(VOICES)}
+
+    @app.post("/api/tts/preview")
+    async def preview_voice(body: PreviewIn):
+        if ctx.tts is None or not ctx.tts.available:
+            raise HTTPException(503, "TTS недоступен")
+        text = (body.text or "").strip() or "Проверка голоса. Раз, два, три."
+        wav = await asyncio.to_thread(ctx.tts.synth, text, body.voice)
+        if not wav:
+            raise HTTPException(503, "не удалось синтезировать")
         return Response(content=wav, media_type="audio/wav")
 
     @app.websocket("/ws/overlay")

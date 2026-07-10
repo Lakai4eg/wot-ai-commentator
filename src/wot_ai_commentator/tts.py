@@ -9,16 +9,36 @@ import threading
 import wave
 from collections import OrderedDict
 
+from .config import Settings
+from .events import Priority
+
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 48000
+VOICES: tuple[str, ...] = ("aidar", "baya", "kseniya", "xenia", "eugene", "random")
+DEFAULT_VOICE = "baya"
+
+
+def pick_voice(settings: Settings, stim_type: str, priority: Priority) -> str:
+    """Голос под контекст: override по типу > правило по приоритету > дефолт.
+
+    Любое имя вне VOICES игнорируется на своём уровне — синтез не падает.
+    """
+    for candidate in (
+        settings.voice_overrides.get(stim_type),
+        settings.voice_by_priority.get(priority.name.lower()),
+        settings.default_voice,
+    ):
+        if candidate in VOICES:
+            return candidate
+    return DEFAULT_VOICE
 
 
 class SileroTTS:
     """Русский TTS на CPU. Без установленного torch — available=False."""
 
     def __init__(self, voice: str = "baya"):
-        self.voice = voice
+        self.voice = voice if voice in VOICES else "baya"
         self.available = False
         self._model = None
         self._lock = threading.Lock()
@@ -35,17 +55,18 @@ class SileroTTS:
             model.to(torch.device("cpu"))
             self._model = model
             self.available = True
-            log.info("Silero TTS загружен (голос %s)", voice)
+            log.info("Silero TTS загружен (голос по умолчанию %s)", self.voice)
         except Exception as e:
             log.warning("Silero TTS недоступен (%s) — голос отключён", e)
 
-    def synth(self, text: str) -> bytes | None:
+    def synth(self, text: str, voice: str | None = None) -> bytes | None:
         if not self.available or self._model is None:
             return None
+        speaker = voice if voice in VOICES else self.voice
         try:
             with self._lock:
                 audio = self._model.apply_tts(
-                    text=text, speaker=self.voice, sample_rate=SAMPLE_RATE
+                    text=text, speaker=speaker, sample_rate=SAMPLE_RATE
                 )
             pcm = (audio.numpy() * 32767).astype("int16").tobytes()
             buf = io.BytesIO()

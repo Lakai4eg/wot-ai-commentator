@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -45,6 +45,12 @@ class Settings:
     # реплику показываем текстом, но не озвучиваем (устаревшая реакция в эфире
     # звучит нелепо). Текст оверлея это не трогает.
     tts_max_age_s: float = 20.0
+    # Озвучка: голос по умолчанию + правила «контекст → голос».
+    # voice_by_priority: "low"/"normal"/"high"/"critical" → голос.
+    # voice_overrides: точный stimulus.type → голос (важнее правила по приоритету).
+    default_voice: str = "baya"
+    voice_by_priority: dict[str, str] = field(default_factory=dict)
+    voice_overrides: dict[str, str] = field(default_factory=dict)
 
 
 def load_settings(path: str | Path) -> Settings:
