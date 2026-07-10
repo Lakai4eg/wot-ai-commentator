@@ -1,3 +1,5 @@
+import random
+
 from wot_ai_commentator.commentary.prompts import build_prompt
 from wot_ai_commentator.config import Settings
 from wot_ai_commentator.events import Priority, Stimulus
@@ -47,3 +49,14 @@ def test_arta_hit_gets_snarky_note():
 def test_session_block_present_when_given():
     p = build_prompt(MODULE, game("frag"), [], ["боёв за сессию: 3"])
     assert "Итоги сессии" in p and "боёв за сессию: 3" in p
+
+
+def test_address_style_rotates_across_replicas():
+    # Стиль обращения подсказывается случайно на каждую реплику: за серию
+    # вызовов «маэстро» не должен быть единственным вариантом.
+    random.seed(0)
+    hints = {
+        build_prompt(MODULE, game("frag"), []).rsplit("Обращение к стримеру на этот раз:", 1)[1]
+        for _ in range(30)
+    }
+    assert len(hints) > 1  # обращение реально меняется от реплики к реплике
