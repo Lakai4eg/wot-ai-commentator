@@ -77,3 +77,28 @@ async def test_commands_disabled(env):
     router.settings.chat_commands_enabled = False
     await router.handle("viewer", "!dir привет")
     assert director.submitted == []
+
+
+@pytest.mark.asyncio
+async def test_open_mode_allows_stranger(env):
+    _, director, router = env
+    router.settings.commands_open_to_all = True
+    await router.handle("randomviewer", "!dir привет")
+    assert len(director.submitted) == 1
+
+
+@pytest.mark.asyncio
+async def test_banned_blocked_even_in_open_mode(env):
+    db, director, router = env
+    db.add_user("troll", role="banned")
+    router.settings.commands_open_to_all = True  # открыто всем...
+    await router.handle("Troll", "!dir спам")
+    assert director.submitted == []  # ...но забаненный всё равно заблокирован
+
+
+@pytest.mark.asyncio
+async def test_banned_blocked_in_whitelist_mode(env):
+    db, director, router = env
+    db.add_user("troll", role="banned")
+    await router.handle("troll", "!dir спам")
+    assert director.submitted == []

@@ -51,3 +51,8 @@ def test_list_users(db):
 def test_invalid_role_raises(db):
     with pytest.raises(ValueError):
         db.add_user("u", role="superuser")
+
+
+def test_banned_role_stored(db):
+    db.add_user("Troll", role="banned")
+    assert db.get_role("troll") == "banned"

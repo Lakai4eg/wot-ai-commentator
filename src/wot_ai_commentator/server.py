@@ -115,6 +115,7 @@ class SettingsIn(BaseModel):
     text_enabled: bool | None = None
     voice_enabled: bool | None = None
     chat_commands_enabled: bool | None = None
+    commands_open_to_all: bool | None = None
     global_cooldown_s: float | None = None
     debounce_s: float | None = None
     debounce_max_s: float | None = None

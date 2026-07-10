@@ -28,8 +28,11 @@ class ChatRouter:
         if cmd is None:
             return
         username = username.lower()
-        if self.db.get_role(username) is None:
-            return  # не из белого списка — молча игнорируем
+        role = self.db.get_role(username)
+        if role == "banned":
+            return  # забанен — команды недоступны всегда, даже в открытом режиме
+        if role is None and not self.settings.commands_open_to_all:
+            return  # не из белого списка, и открытый режим выключен — игнор
 
         now = time.time()
         last = self._last_command_at.get(username, 0.0)

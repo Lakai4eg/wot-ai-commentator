@@ -7,7 +7,9 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROLES = ("director", "admin")
+# director/admin — доступ к командам; banned — команды запрещены всегда,
+# даже в открытом режиме (commands_open_to_all).
+ROLES = ("director", "admin", "banned")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_users (

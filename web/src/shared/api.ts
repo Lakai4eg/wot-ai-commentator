@@ -2,7 +2,7 @@ export interface ChatUser {
   id: number;
   platform: string;
   username: string;
-  role: "director" | "admin";
+  role: "director" | "admin" | "banned";
   added_at: string;
 }
 
@@ -17,6 +17,7 @@ export interface SettingsDto {
   text_enabled: boolean;
   voice_enabled: boolean;
   chat_commands_enabled: boolean;
+  commands_open_to_all: boolean;
   global_cooldown_s: number;
   debounce_s: number;
   debounce_max_s: number;

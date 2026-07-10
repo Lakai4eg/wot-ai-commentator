@@ -70,6 +70,21 @@ async def test_bad_role_rejected(client):
 
 
 @pytest.mark.asyncio
+async def test_banned_role_accepted(client, ctx):
+    r = await client.post("/api/users", json={"username": "troll", "role": "banned"})
+    assert r.status_code == 201
+    assert ctx.db.get_role("troll") == "banned"
+
+
+@pytest.mark.asyncio
+async def test_open_commands_setting_persists(client, ctx):
+    r = await client.put("/api/settings", json={"commands_open_to_all": True})
+    assert r.status_code == 200
+    assert ctx.settings.commands_open_to_all is True
+    assert r.json()["commands_open_to_all"] is True
+
+
+@pytest.mark.asyncio
 async def test_settings_put_persists(client, ctx):
     r = await client.put(
         "/api/settings",

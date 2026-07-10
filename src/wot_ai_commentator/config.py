@@ -24,6 +24,9 @@ class Settings:
     text_enabled: bool = True
     voice_enabled: bool = True
     chat_commands_enabled: bool = True
+    # Открытый режим: команды (напр. !dir) доступны любому зрителю, кроме тех,
+    # кому выдана роль banned. Выключено — работает только белый список.
+    commands_open_to_all: bool = False
     global_cooldown_s: float = 4.0
     # Дебаунс фраз: в буре мелких событий не частим — ждём паузу debounce_s,
     # чтобы всплеск схлопнулся в одну реплику про самое важное. Но не молчим

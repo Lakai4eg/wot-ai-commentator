@@ -15,7 +15,7 @@ export function Panel() {
   const [status, setStatus] = useState<StatusDto>({});
   const [apiKey, setApiKey] = useState("");
   const [newUser, setNewUser] = useState("");
-  const [newRole, setNewRole] = useState<"director" | "admin">("director");
+  const [newRole, setNewRole] = useState<"director" | "admin" | "banned">("director");
   const [message, setMessage] = useState("");
 
   const refreshUsers = useCallback(() => {
@@ -197,6 +197,14 @@ export function Panel() {
             />
             Чат-команды
           </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.commands_open_to_all}
+              onChange={(e) => patch({ commands_open_to_all: e.target.checked })}
+            />
+            Команды всем (кроме забаненных)
+          </label>
         </div>
         <label>
           Не озвучивать реплики старше, секунд (текст всё равно покажем)
@@ -225,9 +233,13 @@ export function Panel() {
             onChange={(e) => setNewUser(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addUser()}
           />
-          <select value={newRole} onChange={(e) => setNewRole(e.target.value as "director" | "admin")}>
+          <select
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value as "director" | "admin" | "banned")}
+          >
             <option value="director">director</option>
             <option value="admin">admin</option>
+            <option value="banned">banned</option>
           </select>
           <button onClick={addUser}>Добавить</button>
         </div>
@@ -252,13 +264,22 @@ export function Panel() {
               </tr>
             ))}
             {users.length === 0 && (
-              <tr><td colSpan={4} className="hint">пусто — команды чата никому не доступны</td></tr>
+              <tr>
+                <td colSpan={4} className="hint">
+                  {settings.commands_open_to_all
+                    ? "пусто — команды доступны всем зрителям"
+                    : "пусто — команды чата никому не доступны"}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
         <p className="hint">
-          Единственная команда: !dir &lt;текст&gt; — заказ реплики режиссёру
-          (для ников из белого списка).
+          Единственная команда: !dir &lt;текст&gt; — заказ реплики режиссёру.
+          {settings.commands_open_to_all
+            ? " Открытый режим включён: доступна всем, кроме роли banned."
+            : " Доступна только пользователям из белого списка (роль director/admin)."}
+          {" "}Роль banned запрещает команды всегда.
         </p>
       </section>
 
