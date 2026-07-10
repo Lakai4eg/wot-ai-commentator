@@ -5,8 +5,9 @@ import pytest
 from wot_ai_commentator.config import Settings
 from wot_ai_commentator.db import WhitelistDB
 from wot_ai_commentator.director import Director
+from wot_ai_commentator.games.base import ActiveGameTracker
+from wot_ai_commentator.games.wot.module import build_module as build_wot
 from wot_ai_commentator.server import AppContext, create_app
-from wot_ai_commentator.session_memory import SessionMemory
 
 
 class FakeBackend:
@@ -20,15 +21,16 @@ class FakeBackend:
 def ctx(tmp_path):
     settings = Settings()
     db = WhitelistDB(tmp_path / "wl.db")
-    memory = SessionMemory()
+    tracker = ActiveGameTracker()
     c = AppContext(
         settings=settings,
         settings_path=tmp_path / "settings.json",
         db=db,
-        memory=memory,
         director=None,
+        tracker=tracker,
     )
-    c.director = Director(settings, memory, FakeBackend(), c.publish)
+    c.director = Director(settings, FakeBackend(), c.publish, tracker)
+    c.director.register(build_wot(settings, submit=lambda s: None))
     yield c
     db.close()
 
@@ -127,6 +129,13 @@ async def test_status_exposes_wotstat(client, ctx):
     assert "detector_diag" not in body
 
 
+
+
+@pytest.mark.asyncio
+async def test_status_exposes_active_game_and_memory(client, ctx):
+    body = (await client.get("/api/status")).json()
+    assert body["active_game"] == "wot"
+    assert isinstance(body["memory"], list)
 
 
 @pytest.mark.asyncio

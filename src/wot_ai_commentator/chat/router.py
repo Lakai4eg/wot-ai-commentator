@@ -1,4 +1,4 @@
-"""Роутер чат-команд: белый список, роли, кулдауны → стимулы директору."""
+"""Роутер чат-команд: белый список, кулдаун на зрителя → стимул директору."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from ..config import Settings
 from ..db import WhitelistDB
 from ..director import Director
 from ..events import Priority, Stimulus
-from .commands import ADMIN_COMMANDS, parse_command, parse_mute_arg
+from .commands import parse_command
 
 log = logging.getLogger(__name__)
 
@@ -28,12 +28,8 @@ class ChatRouter:
         if cmd is None:
             return
         username = username.lower()
-        role = self.db.get_role(username)
-        if role is None:
+        if self.db.get_role(username) is None:
             return  # не из белого списка — молча игнорируем
-        if cmd.name in ADMIN_COMMANDS and role != "admin":
-            log.info("У %s нет прав на !%s", username, cmd.name)
-            return
 
         now = time.time()
         last = self._last_command_at.get(username, 0.0)
@@ -41,28 +37,14 @@ class ChatRouter:
             return
         self._last_command_at[username] = now
 
-        if cmd.name == "mute":
-            seconds = parse_mute_arg(cmd.arg) or 300.0
-            self.director.submit(
-                Stimulus(kind="control", type="mute", payload={"seconds": seconds})
+        # Единственная команда — !dir <текст>: заказ реплики. Приоритет HIGH,
+        # чтобы заказ не стоял в очереди позади потока игровых событий.
+        self.director.submit(
+            Stimulus(
+                kind="chat_order",
+                type="dir",
+                priority=Priority.HIGH,
+                payload={"text": cmd.arg, "username": username},
+                ttl_s=60.0,
             )
-        elif cmd.name == "dir":
-            self.director.submit(
-                Stimulus(
-                    kind="chat_order",
-                    type="dir",
-                    priority=Priority.NORMAL,
-                    payload={"text": cmd.arg, "username": username},
-                    ttl_s=60.0,
-                )
-            )
-        else:  # roast / hype / stats
-            self.director.submit(
-                Stimulus(
-                    kind="chat_order",
-                    type=cmd.name,
-                    priority=Priority.NORMAL,
-                    payload={"username": username},
-                    ttl_s=60.0,
-                )
-            )
+        )

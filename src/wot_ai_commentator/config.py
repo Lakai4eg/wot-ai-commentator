@@ -32,8 +32,10 @@ class Settings:
     debounce_s: float = 1.2
     debounce_max_s: float = 5.0
     user_cooldown_s: float = 60.0
-    # WebSocket мода wotstat-data-provider — единственный источник событий боя.
+    # WebSocket мода wotstat-data-provider — источник событий боя WoT.
     wotstat_url: str = "ws://localhost:38200"
+    # Riot Live Client Data API — локальный HTTPS живого матча LoL.
+    lol_url: str = "https://127.0.0.1:2999"
     server_port: int = 8710
     reply_timeout_s: float = 4.0
 

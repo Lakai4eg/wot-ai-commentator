@@ -5,7 +5,8 @@ import pytest
 from wot_ai_commentator.config import Settings
 from wot_ai_commentator.director import Director
 from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.session_memory import SessionMemory
+from wot_ai_commentator.games.base import ActiveGameTracker
+from wot_ai_commentator.games.wot.module import build_module as build_wot
 
 
 class FakeBackend:
@@ -27,12 +28,15 @@ def make_director(backend=None, **overrides):
     async def publish(text, stimulus):
         published.append((text, stimulus))
 
-    d = Director(settings, SessionMemory(), backend or FakeBackend(), publish)
+    tracker = ActiveGameTracker()
+    d = Director(settings, backend or FakeBackend(), publish, tracker)
+    d.register(build_wot(settings, submit=lambda s: None))
     return d, published
 
 
 def game(type_, priority=Priority.NORMAL, **payload):
-    return Stimulus(kind="game_event", type=type_, priority=priority, payload=payload)
+    return Stimulus(kind="game_event", type=type_, game="wot",
+                    priority=priority, payload=payload)
 
 
 async def drain(director, n_cycles=10):
@@ -130,7 +134,8 @@ async def test_debounce_bypassed_for_chat_order():
     """Заказ из чата отвечается сразу, дебаунс его не держит."""
     d, published = make_director(debounce_s=1.2, debounce_max_s=5.0)
     d._last_game_event_at = time.time()  # буря идёт
-    d.submit(Stimulus(kind="chat_order", type="roast", payload={"username": "u"}))
+    d.submit(Stimulus(kind="chat_order", type="dir",
+                      payload={"text": "скажи привет", "username": "u"}))
     await drain(d)
     assert len(published) == 1
 
@@ -146,14 +151,16 @@ async def test_expired_stimulus_dropped():
 
 
 @pytest.mark.asyncio
-async def test_mute_drops_replicas():
+async def test_dir_order_bypasses_global_cooldown():
+    """Заказ из чата отрабатывает всегда — кулдаун между репликами его не глушит."""
     d, published = make_director()
-    d.submit(Stimulus(kind="control", type="mute", payload={"seconds": 60}))
+    d.settings.global_cooldown_s = 60.0
+    d.submit(game("frag"))
+    await drain(d)  # обычная реплика забрала кулдаун
+    d.submit(Stimulus(kind="chat_order", type="dir",
+                      payload={"text": "скажи привет", "username": "u"}))
     await drain(d)
-    d.submit(game("ammo_rack", Priority.CRITICAL))
-    await drain(d)
-    assert published == []
-    assert d.muted_until > time.time()
+    assert [s.kind for _, s in published] == ["game_event", "chat_order"]
 
 
 @pytest.mark.asyncio
@@ -189,7 +196,7 @@ async def test_silent_stimulus_registers_memory_no_reply():
     d.submit(game("battle_start", map="Химмельсдорф", silent=True))
     await drain(d)
     assert published == []
-    assert d.memory.battle.map == "Химмельсдорф"
+    assert d.games["wot"].memory.battle.map == "Химмельсдорф"
 
 
 @pytest.mark.asyncio
@@ -216,11 +223,53 @@ async def test_battle_context_always_session_rarely():
 
 
 @pytest.mark.asyncio
-async def test_stats_order_always_gets_session():
+async def test_chat_order_routes_to_active_game():
     backend = FakeBackend()
     d, _ = make_director(backend=backend)
     d.SESSION_TEASE_PROB = 0.0
-    d.submit(game("battle_result", outcome="win", silent=True))
-    d.submit(Stimulus(kind="chat_order", type="stats", payload={"username": "u"}))
+    d.tracker.mark_live("wot")
+    d.submit(Stimulus(kind="chat_order", type="dir",
+                      payload={"text": "подколи стримера", "username": "u"}))
     await drain(d)
-    assert "Итоги сессии" in backend.prompts[-1]
+    assert "Мир танков" in backend.prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_unknown_game_falls_back_to_active():
+    d, published = make_director()
+    d.submit(Stimulus(kind="game_event", type="frag", game="quake"))
+    await drain(d)
+    assert len(published) == 1  # не упали, обработали активным модулем
+
+
+from wot_ai_commentator.games.lol.module import build_module as build_lol
+
+
+@pytest.mark.asyncio
+async def test_lol_stimulus_routes_to_lol_module():
+    backend = FakeBackend()
+    d, published = make_director(backend=backend)
+    d.SESSION_TEASE_PROB = 0.0
+    d.register(build_lol(Settings(), submit=lambda s: None))
+    d.submit(Stimulus(kind="game_event", type="frag", game="lol",
+                      priority=Priority.HIGH, payload={"target": "Darius"}))
+    await drain(d)
+    assert len(published) == 1
+    assert "League of Legends" in backend.prompts[-1]
+    assert d.games["lol"].memory.battle.kills == 1
+    assert d.games["wot"].memory.battle.frags == 0  # память WoT не тронута
+
+
+@pytest.mark.asyncio
+async def test_lol_multikill_bypasses_cooldown():
+    d, published = make_director()
+    d.register(build_lol(Settings(), submit=lambda s: None))
+    d.settings.global_cooldown_s = 60.0
+    d.submit(Stimulus(kind="game_event", type="frag", game="lol",
+                      priority=Priority.HIGH, payload={"target": "Darius"}))
+    await drain(d)
+    d.submit(Stimulus(kind="game_event", type="multikill", game="lol",
+                      priority=Priority.CRITICAL,
+                      payload={"count": 5, "label": "пентакилл"}))
+    await drain(d)
+    assert [s.type for _, s in published] == ["frag", "multikill"]

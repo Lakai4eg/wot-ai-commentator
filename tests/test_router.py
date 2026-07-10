@@ -4,6 +4,7 @@ from wot_ai_commentator.chat.router import ChatRouter
 from wot_ai_commentator.chat.twitch import parse_privmsg
 from wot_ai_commentator.config import Settings
 from wot_ai_commentator.db import WhitelistDB
+from wot_ai_commentator.events import Priority
 
 
 class FakeDirector:
@@ -33,27 +34,8 @@ def test_parse_privmsg():
 @pytest.mark.asyncio
 async def test_stranger_ignored(env):
     _, director, router = env
-    await router.handle("stranger", "!roast")
+    await router.handle("stranger", "!dir привет")
     assert director.submitted == []
-
-
-@pytest.mark.asyncio
-async def test_director_role_cannot_mute(env):
-    db, director, router = env
-    db.add_user("viewer", role="director")
-    await router.handle("viewer", "!mute 5m")
-    assert director.submitted == []
-
-
-@pytest.mark.asyncio
-async def test_admin_can_mute(env):
-    db, director, router = env
-    db.add_user("boss", role="admin")
-    await router.handle("boss", "!mute 5m")
-    kinds = [(s.kind, s.type) for s in director.submitted]
-    assert ("control", "mute") in kinds
-    mute = next(s for s in director.submitted if s.type == "mute")
-    assert mute.payload["seconds"] == 300
 
 
 @pytest.mark.asyncio
@@ -64,16 +46,27 @@ async def test_dir_order_submitted(env):
     assert len(director.submitted) == 1
     s = director.submitted[0]
     assert s.kind == "chat_order" and s.type == "dir"
+    assert s.priority == Priority.HIGH  # заказ не стоит позади игровых событий
     assert s.payload["text"] == "похвали стримера"
     assert s.payload["username"] == "viewer"
+
+
+@pytest.mark.asyncio
+async def test_removed_commands_ignored(env):
+    db, director, router = env
+    db.add_user("boss", role="admin")
+    await router.handle("boss", "!mute 5m")
+    await router.handle("boss", "!roast")
+    await router.handle("boss", "!stats")
+    assert director.submitted == []
 
 
 @pytest.mark.asyncio
 async def test_user_cooldown(env):
     db, director, router = env
     db.add_user("viewer", role="director")
-    await router.handle("viewer", "!roast")
-    await router.handle("viewer", "!hype")
+    await router.handle("viewer", "!dir раз")
+    await router.handle("viewer", "!dir два")
     assert len(director.submitted) == 1
 
 
@@ -82,5 +75,5 @@ async def test_commands_disabled(env):
     db, director, router = env
     db.add_user("viewer", role="director")
     router.settings.chat_commands_enabled = False
-    await router.handle("viewer", "!roast")
+    await router.handle("viewer", "!dir привет")
     assert director.submitted == []

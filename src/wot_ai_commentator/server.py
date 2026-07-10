@@ -20,7 +20,7 @@ from .config import Settings, save_settings
 from .db import ROLES, WhitelistDB
 from .director import Director
 from .events import Stimulus
-from .session_memory import SessionMemory
+from .games.base import ActiveGameTracker
 from .tts import AudioStore, SileroTTS
 
 log = logging.getLogger(__name__)
@@ -31,8 +31,8 @@ class AppContext:
     settings: Settings
     settings_path: Path
     db: WhitelistDB
-    memory: SessionMemory
     director: Director
+    tracker: ActiveGameTracker | None = None
     backend: SwitchBackend | GeminiBackend | None = None
     audio: AudioStore = field(default_factory=AudioStore)
     tts: SileroTTS | None = None
@@ -184,12 +184,15 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.get("/api/status")
     async def status():
+        active = ctx.tracker.active if ctx.tracker else "wot"
+        module = ctx.director.games.get(active) if ctx.director else None
         return {
             **ctx.statuses,
+            "active_game": active,
             "overlay_clients": len(ctx.ws_clients),
             "director": ctx.director.stats(),
             "tts": bool(ctx.tts and ctx.tts.available),
-            "memory": ctx.memory.summary_lines(),
+            "memory": module.memory.summary_lines() if module else [],
         }
 
     @app.get("/api/audio/{audio_id}")

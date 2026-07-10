@@ -43,3 +43,7 @@ def test_new_defaults_after_ocr_removal():
         "game_window_hint",
         "max_replicas_per_minute",
     }
+
+
+def test_lol_url_default():
+    assert Settings().lol_url == "https://127.0.0.1:2999"

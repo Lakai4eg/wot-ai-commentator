@@ -29,6 +29,11 @@ export interface StatusDto {
     game_state?: string;
     events_found?: number;
   };
+  lol?: {
+    status: "connected" | "waiting";
+    events_found?: number;
+  };
+  active_game?: string;
   chat?: string;
   tts?: boolean;
   tts_status?: string;
@@ -38,7 +43,6 @@ export interface StatusDto {
   director?: {
     queue_len: number;
     replicas_last_minute: number;
-    muted_until: number | null;
   };
   memory?: string[];
 }

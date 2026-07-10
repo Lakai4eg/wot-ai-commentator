@@ -38,8 +38,10 @@ TriggerCb = Callable[[Any], None]  # cb(value)
 class DataProviderClient:
     """Клиент WotStat: дерево состояния, подписки, реконнект-луп."""
 
-    def __init__(self, url: str = "ws://localhost:38200") -> None:
+    def __init__(self, url: str = "ws://localhost:38200",
+                 on_live: Callable[[], None] | None = None) -> None:
         self.url = url
+        self.on_live = on_live
         # статус только "connected" (после первого init) | "waiting"
         self.status: str = "waiting"
         # time.time() последнего полученного сообщения (любого типа)
@@ -86,7 +88,13 @@ class DataProviderClient:
             self._apply_init(msg.get("states") or [])
             # статус "connected" наступает именно после init, а не после
             # открытия сокета (как в официальном SDK).
+            was_connected = self.status == "connected"
             self.status = "connected"
+            if not was_connected and self.on_live is not None:
+                try:
+                    self.on_live()
+                except Exception:
+                    log.exception("WotStat: on_live-коллбек упал")
         elif mtype == "state":
             self._apply_state(msg.get("path"), msg.get("value"))
         elif mtype == "trigger":

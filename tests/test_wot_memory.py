@@ -1,7 +1,7 @@
 import time
 
 from wot_ai_commentator.events import Priority, Stimulus
-from wot_ai_commentator.session_memory import SessionMemory
+from wot_ai_commentator.games.wot.memory import SessionMemory
 
 
 def ev(type_, **payload):

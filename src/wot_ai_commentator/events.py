@@ -1,4 +1,4 @@
-"""Стимулы (игровые события, чат-заказы, управляющие команды) и приоритеты."""
+"""Стимулы (игровые события, чат-заказы) и приоритеты."""
 
 from __future__ import annotations
 
@@ -14,20 +14,11 @@ class Priority(IntEnum):
     CRITICAL = 3
 
 
-GAME_EVENT_TYPES = (
-    "frag",
-    "death",
-    "ammo_rack",
-    "oneshot",
-    "damage_record",
-    "battle_result",
-)
-
-
 @dataclass
 class Stimulus:
-    kind: str  # game_event | chat_order | control
+    kind: str  # game_event | chat_order
     type: str
+    game: str = ""  # id игры-источника ("wot"/"lol"); пусто — определит трекер
     priority: Priority = Priority.NORMAL
     payload: dict = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)

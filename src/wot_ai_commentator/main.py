@@ -16,11 +16,11 @@ from .commentary.switch import SwitchBackend
 from .config import load_settings
 from .db import WhitelistDB
 from .director import Director
+from .games.base import ActiveGameTracker
+from .games.lol.module import build_module as build_lol_module
+from .games.wot.module import build_module as build_wot_module
 from .server import AppContext, create_app
-from .session_memory import SessionMemory
 from .tts import SileroTTS
-from .wotstat.client import DataProviderClient
-from .wotstat.mapper import EventMapper
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ async def run() -> None:
 
     settings = load_settings(SETTINGS_PATH)
     db = WhitelistDB(DB_PATH)
-    memory = SessionMemory()
     backend = SwitchBackend(
         settings,
         GeminiBackend(settings.gemini_api_key, settings.gemini_model, settings.reply_timeout_s),
@@ -49,16 +48,25 @@ async def run() -> None:
         ),
     )
 
+    tracker = ActiveGameTracker(default="wot")
     ctx = AppContext(
         settings=settings,
         settings_path=SETTINGS_PATH,
         db=db,
-        memory=memory,
         director=None,  # type: ignore[arg-type]
+        tracker=tracker,
         backend=backend,
     )
-    director = Director(settings, memory, backend, ctx.publish)
+    director = Director(settings, backend, ctx.publish, tracker)
     ctx.director = director
+
+    # Игровые модули: источники всегда запущены, активную игру решает трекер.
+    wot = build_wot_module(settings, director.submit,
+                           on_live=lambda: tracker.mark_live("wot"))
+    director.register(wot)
+    lol = build_lol_module(settings, director.submit,
+                           on_live=lambda: tracker.mark_live("lol"))
+    director.register(lol)
 
     # TTS: загрузка модели в фоне, не блокируя старт
     def load_tts() -> None:
@@ -69,25 +77,26 @@ async def run() -> None:
     asyncio.get_event_loop().run_in_executor(None, load_tts)
     ctx.statuses["tts_status"] = "loading"
 
-    # Источник событий боя: WotStat DataProvider (клиент + маппер).
-    # Клиент работает asyncio-таском в этом же лупе, коллбеки маппера зовут
-    # director.submit напрямую (без потоков — всё в одном событийном лупе).
-    client = DataProviderClient(settings.wotstat_url)
-    mapper = EventMapper(client, submit=director.submit)
-
     # Чат
     router = ChatRouter(db, director, settings)
     chat = TwitchChatReader(settings.twitch_channel, router.handle)
 
     # LLM-статус
     def refresh_statuses() -> None:
-        diag = mapper.diag
+        wot_diag = wot.diag()
         ctx.statuses["wotstat"] = {
-            "status": client.status,
-            "game_state": diag["game_state"],
-            "events_found": diag["events_found"],
-            "last_event_at": client.last_event_at,
-            "last_events": list(diag["last_events"]),
+            "status": wot.source.status,
+            "game_state": wot_diag["game_state"],
+            "events_found": wot_diag["events_found"],
+            "last_event_at": wot.source.last_event_at,
+            "last_events": list(wot_diag["last_events"]),
+        }
+        lol_diag = lol.diag()
+        ctx.statuses["lol"] = {
+            "status": lol.source.status,
+            "events_found": lol_diag["events_found"],
+            "last_event_at": lol.source.last_event_at,
+            "last_events": list(lol_diag["last_events"]),
         }
         ctx.statuses["chat"] = chat.status
         ctx.statuses["llm_last_error"] = backend.last_error
@@ -109,7 +118,8 @@ async def run() -> None:
     tasks = [
         asyncio.create_task(director.run()),
         asyncio.create_task(chat.run()),
-        asyncio.create_task(client.run()),
+        asyncio.create_task(wot.source.run()),
+        asyncio.create_task(lol.source.run()),
         asyncio.create_task(status_loop()),
     ]
     try:
@@ -117,7 +127,8 @@ async def run() -> None:
     finally:
         director.stop()
         chat.stop()
-        client.stop()
+        wot.source.stop()
+        lol.source.stop()
         for t in tasks:
             t.cancel()
         db.close()

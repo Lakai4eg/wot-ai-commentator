@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from .events import Stimulus
+from ...events import Stimulus
 
 
 class BattleMemory:

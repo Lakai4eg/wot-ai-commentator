@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from wot_ai_commentator.events import Priority
-from wot_ai_commentator.wotstat.mapper import EventMapper
+from wot_ai_commentator.games.wot.mapper import EventMapper
 
 MY_ID = 42
 MY_TEAM = 1
@@ -421,3 +421,9 @@ def test_diag_tracks_events(wired):
     assert d["game_state"] == "battle"
     assert d["events_found"] == 1
     assert list(d["last_events"]) == ["spotted"]
+
+
+def test_stimuli_stamped_with_wot(wired):
+    client, _, emitted = wired
+    client.fire("battle.onPlayerFeedback", {"type": "kill", "data": {"vehicle": veh("IS-7")}})
+    assert emitted and all(s.game == "wot" for s in emitted)

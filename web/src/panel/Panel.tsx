@@ -72,9 +72,14 @@ export function Panel() {
         WoT AI Commentator
         <span className="badges">
           <Badge
-            label="wotstat"
+            label={status.active_game === "wot" ? "WoT ●" : "WoT"}
             ok={status.wotstat?.status === "connected"}
             detail={status.wotstat ? `${status.wotstat.status} (${status.wotstat.game_state ?? "?"})` : undefined}
+          />
+          <Badge
+            label={status.active_game === "lol" ? "LoL ●" : "LoL"}
+            ok={status.lol?.status === "connected"}
+            detail={status.lol?.status ?? "waiting"}
           />
           <Badge label="чат" ok={status.chat === "connected"} detail={status.chat} />
           <Badge
@@ -196,7 +201,6 @@ export function Panel() {
         {status.director && (
           <p className="hint">
             очередь: {status.director.queue_len}, реплик за минуту: {status.director.replicas_last_minute}
-            {status.director.muted_until ? ", ЗАМЬЮЧЕН" : ""}
           </p>
         )}
       </section>
@@ -242,8 +246,8 @@ export function Panel() {
           </tbody>
         </table>
         <p className="hint">
-          Команды: !dir &lt;текст&gt;, !roast, !hype, !stats — роль director;
-          !mute 10m — только admin.
+          Единственная команда: !dir &lt;текст&gt; — заказ реплики режиссёру
+          (для ников из белого списка).
         </p>
       </section>
 

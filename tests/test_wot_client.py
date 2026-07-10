@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from wot_ai_commentator.wotstat.client import DataProviderClient
+from wot_ai_commentator.games.wot.client import DataProviderClient
 
 
 def _init(states):
@@ -153,3 +153,16 @@ async def test_last_event_at_updates(client):
     assert client.last_event_at is None
     await client.handle_message(_state("player.name", "Renou"))
     assert isinstance(client.last_event_at, float)
+
+
+@pytest.mark.asyncio
+async def test_on_live_fires_once_per_connect():
+    calls = []
+    c = DataProviderClient(on_live=lambda: calls.append(1))
+    init = json.dumps({"type": "init", "states": []})
+    await c.handle_message(init)
+    await c.handle_message(init)  # повторный init того же коннекта — без дубля
+    assert calls == [1]
+    c.status = "waiting"  # реконнект
+    await c.handle_message(init)
+    assert calls == [1, 1]

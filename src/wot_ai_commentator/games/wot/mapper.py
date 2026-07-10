@@ -16,7 +16,7 @@ import time
 from collections import deque
 from typing import Any, Callable
 
-from ..events import Priority, Stimulus
+from ...events import Priority, Stimulus
 
 log = logging.getLogger(__name__)
 
@@ -140,6 +140,7 @@ class EventMapper:
         stim = Stimulus(
             kind="game_event",
             type=type_,
+            game="wot",
             priority=priority,
             payload=payload,
             ttl_s=ttl_s,
