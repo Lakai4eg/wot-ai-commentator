@@ -215,6 +215,15 @@ def test_spotted(wired):
     assert s.priority == Priority.LOW
 
 
+def test_spotted_dedup(wired):
+    """Засвет частит — второй в пределах окна дедупа не даёт новой реплики."""
+    client, _, emitted = wired
+    client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
+    client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
+    s = only(emitted)
+    assert s.type == "spotted"
+
+
 def test_assist_growth_threshold(wired):
     client, _, emitted = wired
     client.set_state("battle.efficiency.assist", 100)  # <200 — молчим
@@ -377,6 +386,29 @@ def test_vehicle_change_silent(wired):
     assert s.type == "vehicle_change"
     assert s.payload.get("silent") is True
     assert s.payload.get("tank") == "T-34"
+
+
+def test_tier11_tank_triggers_joke(wired):
+    """Танк 11 уровня даёт отдельную (не тихую) реплику-подколку."""
+    client, _, emitted = wired
+    tank = veh("Object 11")
+    tank["level"] = 11
+    client.set_state("hangar.vehicle.info", tank)
+    types = [s.type for s in emitted]
+    assert "vehicle_change" in types
+    tier11 = [s for s in emitted if s.type == "tier11"]
+    assert len(tier11) == 1
+    assert tier11[0].payload == {"tank": "Object 11"}
+    assert "silent" not in tier11[0].payload
+
+
+def test_tier10_tank_no_joke(wired):
+    """Обычный 10 уровень — только тихая смена танка, без подколки про 11."""
+    client, _, emitted = wired
+    tank = veh("E 100")
+    tank["level"] = 10
+    client.set_state("hangar.vehicle.info", tank)
+    assert only(emitted).type == "vehicle_change"
 
 
 # --- диагностика ----------------------------------------------------------

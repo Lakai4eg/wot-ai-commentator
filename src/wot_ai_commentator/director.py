@@ -14,12 +14,16 @@ from .commentary.base import CommentaryBackend
 from .commentary.prompts import build_prompt
 from .commentary.templates import fallback_line
 from .config import Settings
-from .events import Stimulus
+from .events import Priority, Stimulus
 from .session_memory import SessionMemory
 
 log = logging.getLogger(__name__)
 
 PublishFn = Callable[[str, Stimulus], Awaitable[None]]
+
+# События, ради которых нарушаем кулдаун: реплика выходит всегда (смерть — раз
+# за бой, драматичный момент, теряться в тишине кулдауна ей нельзя).
+ALWAYS_SPEAK_TYPES = frozenset({"death"})
 
 
 class Director:
@@ -44,6 +48,7 @@ class Director:
         self._heap: list[tuple[int, int, Stimulus]] = []
         self._counter = itertools.count()
         self._last_replica_at = 0.0
+        self._last_game_event_at = 0.0  # для дебаунса: когда сыпались события
         self._replica_times: list[float] = []
         self._wakeup = asyncio.Event()
         self._running = False
@@ -54,6 +59,8 @@ class Director:
         if stimulus.kind == "control":
             self._apply_control(stimulus)
             return
+        if stimulus.kind == "game_event" and not stimulus.payload.get("silent"):
+            self._last_game_event_at = time.time()
         heapq.heappush(self._heap, (-int(stimulus.priority), next(self._counter), stimulus))
         self._wakeup.set()
 
@@ -71,12 +78,35 @@ class Director:
         # Единственный регулятор темпа — глобальный кулдаун между репликами.
         return now - self._last_replica_at >= self.settings.global_cooldown_s
 
+    def _debounce_hold(self, stimulus: Stimulus, now: float) -> bool:
+        """Придержать мелкое событие, пока не уляжется буря событий.
+
+        Дебаунс трогает только НЕкрупные (≤ NORMAL) игровые события: буря
+        засветов/уронов схлопывается в одну реплику про самое важное. Крупные
+        события (фраг/смерть/пожар/детонация — HIGH/CRITICAL) и заказы из чата
+        проходят без задержки. `stimulus` — верхушка кучи (макс. приоритет), так
+        что при ≤ NORMAL в очереди заведомо нет ничего важнее — держать безопасно.
+        """
+        if self.settings.debounce_s <= 0:
+            return False
+        if stimulus.kind != "game_event" or stimulus.payload.get("silent"):
+            return False
+        if stimulus.priority > Priority.NORMAL:
+            return False
+        # Держим, пока события всё ещё сыплются (пауза короче debounce_s)…
+        bursting = now - self._last_game_event_at < self.settings.debounce_s
+        # …но не дольше debounce_max_s, иначе в затяжном замесе замолчим совсем.
+        within_cap = now - stimulus.created_at < self.settings.debounce_max_s
+        return bursting and within_cap
+
     async def process_once(self) -> bool:
         """Обработать один стимул из очереди. True, если что-то сделали."""
         if not self._heap:
             return False
-        _, _, stimulus = heapq.heappop(self._heap)
         now = time.time()
+        if self._debounce_hold(self._heap[0][2], now):
+            return False  # буря не улеглась — ждём, реплику пока не рождаем
+        _, _, stimulus = heapq.heappop(self._heap)
 
         # Память обновляем всегда — даже если реплика не выйдет.
         facts = self.memory.register(stimulus)
@@ -85,11 +115,15 @@ class Director:
         if stimulus.payload.get("silent"):
             return True
 
+        must_speak = (
+            stimulus.kind == "game_event" and stimulus.type in ALWAYS_SPEAK_TYPES
+        )
+
         if stimulus.expired(now):
             return True
         if now < self.muted_until:
             return True
-        if not self._rate_ok(now):
+        if not must_speak and not self._rate_ok(now):
             return True
 
         # Реплика отталкивается от текущего боя; сессия — редкая подколка.
@@ -124,8 +158,11 @@ class Director:
             worked = await self.process_once()
             if not worked:
                 self._wakeup.clear()
+                # Если в очереди что-то придержано дебаунсом — просыпаемся чаще,
+                # чтобы вовремя выпустить реплику, как только буря уляжется.
+                timeout = 0.2 if self._heap else 1.0
                 try:
-                    await asyncio.wait_for(self._wakeup.wait(), timeout=1.0)
+                    await asyncio.wait_for(self._wakeup.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     pass
 

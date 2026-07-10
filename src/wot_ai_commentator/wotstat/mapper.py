@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 _BIG_DAMAGE = 150
 # Пожар тикает каждые пару секунд — не частим репликами про огонь.
 _FIRE_DEDUP_S = 15.0
+# Засвет срабатывает на каждый обнаруженный танк — редкая реплика вместо спама.
+_SPOTTED_DEDUP_S = 45.0
 # Ассист/блок копятся мелкими порциями — реагируем на заметный рост.
 _ACCUM_STEP = 200
 # Доля ХП, ниже которой считаем «на грани».
@@ -78,6 +80,7 @@ class EventMapper:
         self._damage_milestone = 0  # достигнутая веха урона (в тысячах)
         self._low_hp_flagged = False
         self._last_fire_at = 0.0
+        self._last_spotted_at = 0.0
         self._base_points: dict[Any, int] = {}  # baseID → последние points
         self._base_emitted: set[Any] = set()  # baseID, по которым уже дали реплику
 
@@ -111,6 +114,21 @@ class EventMapper:
             or vehicle.get("tag")
             or "неизвестный"
         )
+
+    @staticmethod
+    def _vehicle_level(vehicle: Any) -> int | None:
+        """Уровень (тир) танка из info — int или None, если поля нет."""
+        if not isinstance(vehicle, dict):
+            return None
+        for key in ("level", "tier"):
+            value = vehicle.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return None
 
     def _emit(
         self,
@@ -206,6 +224,11 @@ class EventMapper:
         elif ftype == "crit":
             self._emit("crit", {"detail": data.get("critsCount")}, Priority.LOW, ttl_s=10)
         elif ftype == "spotted":
+            # Засвет частит — реплику даём не чаще раза в _SPOTTED_DEDUP_S.
+            now = time.time()
+            if now - self._last_spotted_at < _SPOTTED_DEDUP_S:
+                return
+            self._last_spotted_at = now
             self._emit("spotted", {}, Priority.LOW, ttl_s=8)
 
     def _on_battle_result(self, value: Any) -> None:
@@ -322,3 +345,6 @@ class EventMapper:
             return
         tank = self._vehicle_name(new) if isinstance(new, dict) else str(new)
         self._emit("vehicle_change", {"tank": tank, "silent": True}, Priority.NORMAL, ttl_s=20)
+        # «Всеми любимые» танки 11 уровня — отдельный повод для подколки.
+        if self._vehicle_level(new) == 11:
+            self._emit("tier11", {"tank": tank}, Priority.NORMAL, ttl_s=20)

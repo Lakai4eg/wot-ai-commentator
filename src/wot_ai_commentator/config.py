@@ -25,6 +25,12 @@ class Settings:
     voice_enabled: bool = True
     chat_commands_enabled: bool = True
     global_cooldown_s: float = 4.0
+    # Дебаунс фраз: в буре мелких событий не частим — ждём паузу debounce_s,
+    # чтобы всплеск схлопнулся в одну реплику про самое важное. Но не молчим
+    # дольше debounce_max_s даже в непрерывном замесе. Крупные события (фраг,
+    # смерть, пожар, детонация) и заказы из чата дебаунс не задерживает.
+    debounce_s: float = 1.2
+    debounce_max_s: float = 5.0
     user_cooldown_s: float = 60.0
     # WebSocket мода wotstat-data-provider — единственный источник событий боя.
     wotstat_url: str = "ws://localhost:38200"

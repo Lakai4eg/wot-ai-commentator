@@ -18,6 +18,8 @@ export interface SettingsDto {
   voice_enabled: boolean;
   chat_commands_enabled: boolean;
   global_cooldown_s: number;
+  debounce_s: number;
+  debounce_max_s: number;
   user_cooldown_s: number;
 }
 
