@@ -47,7 +47,10 @@ class LolMapper:
         self._was_dead = False
         self._low_hp_flagged = False
         self._death_emitted_at = 0.0
-        # Страховка isDead озвучила смерть, а журнал её ещё не подтвердил.
+        # Счётчик смертей стримера (scores.deaths) — авторитетный сигнал смерти.
+        # None до первого снапшота: там синхронизируемся, не озвучивая историю.
+        self._death_count: int | None = None
+        # Страховка озвучила смерть, а журнал её ещё не подтвердил.
         self._snapshot_death_pending = False
 
     # --- диагностика ---------------------------------------------------
@@ -269,13 +272,25 @@ class LolMapper:
     def _process_snapshot(self, data: dict, me: dict | None) -> None:
         if me is None:
             return
-        dead = bool(me.get("isDead"))
-        if dead and not self._was_dead:
-            # Страховка: смерть без ChampionKill в журнале (пропущенный поллом кадр).
+        # Смерть определяем по РОСТУ счётчика scores.deaths, а не по isDead.
+        # isDead — «липкий» флаг (держится весь таймер респауна) и в practice
+        # tool / при чужой смерти может стоять true без реальной смерти стримера
+        # — раньше это давало ложное «ты умер». Счётчик растёт ровно на реальной
+        # смерти (в т.ч. не от чемпиона, чего нет в журнале ChampionKill).
+        deaths = int((me.get("scores") or {}).get("deaths") or 0)
+        if self._death_count is None:
+            self._death_count = deaths  # первый снапшот: синхронизируемся молча
+        elif deaths > self._death_count:
+            self._death_count = deaths
+            # Дедуп со свежей журнальной смертью (тот же смертельный удар).
             if time.time() - self._death_emitted_at > _DEATH_DEDUP_S:
                 self._death_emitted_at = time.time()
                 self._snapshot_death_pending = True
                 self._emit("death", {"killer": "неизвестный"}, Priority.HIGH, ttl_s=30)
+        elif deaths < self._death_count:
+            self._death_count = deaths  # новый матч/рассинхрон — просто пересинк
+
+        dead = bool(me.get("isDead"))
         if not dead and self._was_dead:
             self._low_hp_flagged = False  # респаун — «на грани» снова возможно
         self._was_dead = dead

@@ -9,7 +9,7 @@ ENEMY = "Enemy#EU1"
 ALLY = "Ally#RU2"
 
 
-def payload(events=(), game_time=100.0, hp=(1000.0, 1000.0), me_dead=False):
+def payload(events=(), game_time=100.0, hp=(1000.0, 1000.0), me_dead=False, deaths=0):
     return {
         "activePlayer": {
             "riotId": ME,
@@ -17,7 +17,7 @@ def payload(events=(), game_time=100.0, hp=(1000.0, 1000.0), me_dead=False):
         },
         "allPlayers": [
             {"riotId": ME, "championName": "Garen", "team": "ORDER",
-             "isDead": me_dead, "scores": {"kills": 0, "deaths": 0, "assists": 0}},
+             "isDead": me_dead, "scores": {"kills": 0, "deaths": deaths, "assists": 0}},
             {"riotId": ALLY, "championName": "Lux", "team": "ORDER",
              "isDead": False, "scores": {}},
             {"riotId": ENEMY, "championName": "Darius", "team": "CHAOS",
@@ -255,16 +255,16 @@ def test_two_distinct_journal_deaths_in_one_batch_both_emitted():
     assert all(d.payload["killer"] == "Darius" for d in deaths)
 
 
-def test_journal_death_deduped_after_isdead_safety_net():
+def test_journal_death_deduped_after_counter_safety_net():
     m, stims = make()
     m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=5.0))
     stims.clear()
-    # Страховка сработала первой: isDead=true, журнал отстал.
-    m.handle_payload(payload(game_time=50.0, me_dead=True))
+    # Страховка сработала первой: счётчик смертей вырос, журнал отстал.
+    m.handle_payload(payload(game_time=50.0, me_dead=True, deaths=1))
     # Журнал догнал: тот же ChampionKill не должен родить вторую смерть.
     events = [{"EventID": 0, "EventName": "GameStart"},
               {"EventID": 1, "EventName": "ChampionKill", "KillerName": ENEMY, "VictimName": ME}]
-    m.handle_payload(payload(events=events, game_time=51.0, me_dead=True))
+    m.handle_payload(payload(events=events, game_time=51.0, me_dead=True, deaths=1))
     deaths = [s for s in stims if s.type == "death"]
     assert len(deaths) == 1 and deaths[0].payload["killer"] == "неизвестный"
 
@@ -284,15 +284,37 @@ def test_new_match_detected_by_journal_reset_without_time_backwards():
     assert [s.type for s in stims] == ["battle_start"]
 
 
-def test_isdead_safety_net_no_duplicates():
+def test_death_counter_safety_net_no_duplicates():
     m, stims = make()
     m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=5.0))
     stims.clear()
     m._death_emitted_at = time.time() - 60  # давно не умирали
-    m.handle_payload(payload(game_time=50.0, me_dead=True))
-    m.handle_payload(payload(game_time=51.0, me_dead=True))  # всё ещё мёртв — без дубля
+    m.handle_payload(payload(game_time=50.0, me_dead=True, deaths=1))   # счётчик 0→1
+    m.handle_payload(payload(game_time=51.0, me_dead=True, deaths=1))   # всё ещё 1 — без дубля
     deaths = [s for s in stims if s.type == "death"]
     assert len(deaths) == 1 and deaths[0].payload["killer"] == "неизвестный"
+
+
+def test_isdead_true_without_death_counter_growth_is_not_a_death():
+    # Регрессия (баг с ложной смертью при первой крови): isDead=True как
+    # артефакт practice tool / чужой смерти, но счётчик смертей стримера не
+    # вырос — журнал смерти не видел, озвучивать нечего.
+    m, stims = make()
+    m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=5.0))
+    stims.clear()
+    m.handle_payload(payload(game_time=50.0, me_dead=True, deaths=0))
+    assert [s for s in stims if s.type == "death"] == []
+
+
+def test_death_counter_catches_non_champion_death():
+    # Смерть не от чемпиона (башня/миньон/казнь): ChampionKill в журнале нет,
+    # но счётчик смертей вырос — озвучиваем как смерть с неизвестным убийцей.
+    m, stims = make()
+    m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=5.0))
+    stims.clear()
+    m.handle_payload(payload(game_time=50.0, me_dead=True, deaths=1))
+    d = [s for s in stims if s.type == "death"]
+    assert len(d) == 1 and d[0].payload["killer"] == "неизвестный"
 
 
 def test_low_hp_silent_once_per_life():
