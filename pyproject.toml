@@ -22,6 +22,7 @@ dev = [
 ]
 ml = [
     "torch>=2.2",
+    "omegaconf>=2.3",
 ]
 
 [tool.setuptools.packages.find]
