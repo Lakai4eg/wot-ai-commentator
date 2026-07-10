@@ -32,6 +32,6 @@ def build_module(
         describe_event=describe_event,
         flavor_lines=flavor_lines,
         fallback_line=fallback_line,
-        always_speak_types=frozenset({"death", "multikill"}),
+        always_speak_types=frozenset({"battle_start", "death", "multikill"}),
         diag=lambda: mapper.diag,
     )

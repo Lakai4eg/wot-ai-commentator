@@ -33,7 +33,7 @@ def make():
     return LolMapper(submit=stims.append), stims
 
 
-def test_fresh_game_emits_silent_battle_start():
+def test_fresh_game_emits_speaking_battle_start():
     m, stims = make()
     m.handle_payload(payload(
         events=[{"EventID": 0, "EventName": "GameStart", "EventTime": 0.0}],
@@ -41,8 +41,20 @@ def test_fresh_game_emits_silent_battle_start():
     ))
     assert [s.type for s in stims] == ["battle_start"]
     s = stims[0]
-    assert s.game == "lol" and s.payload["silent"] is True
+    # Настоящий GameStart звучит (интро про прибытие Годжо на Рифт), не тихий.
+    assert s.game == "lol" and s.payload["silent"] is False
     assert s.payload["champion"] == "Garen"
+
+
+def test_midgame_connect_battle_start_stays_silent():
+    m, stims = make()
+    # Подключились посреди матча — «прибытие» уже не к месту, старт тихий.
+    m.handle_payload(payload(
+        events=[{"EventID": 0, "EventName": "GameStart"}],
+        game_time=600.0,
+    ))
+    assert [s.type for s in stims] == ["battle_start"]
+    assert stims[0].payload["silent"] is True
 
 
 def test_midgame_connect_fast_forwards_history():

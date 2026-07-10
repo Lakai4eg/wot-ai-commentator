@@ -118,7 +118,9 @@ class LolMapper:
         except Exception:  # шоу продолжается даже если приёмник упал
             log.exception("LolMapper: submit упал на событии %s", type_)
 
-    def _emit_battle_start(self, data: dict, me: dict | None) -> None:
+    def _emit_battle_start(self, data: dict, me: dict | None, *, silent: bool = True) -> None:
+        # silent=True — тихий старт (подключение посреди матча): только память.
+        # silent=False — настоящий GameStart: звучит интро (прибытие Годжо на Рифт).
         if self._started:
             return
         self._started = True
@@ -126,7 +128,7 @@ class LolMapper:
         self._emit(
             "battle_start",
             {"map": gd.get("mapName"), "mode": gd.get("gameMode"),
-             "champion": (me or {}).get("championName"), "silent": True},
+             "champion": (me or {}).get("championName"), "silent": silent},
         )
 
     # --- журнал событий ----------------------------------------------------
@@ -162,7 +164,7 @@ class LolMapper:
     def _dispatch_event(self, ev: dict, data: dict, me: dict | None, players: list) -> None:
         name = ev.get("EventName")
         if name == "GameStart":
-            self._emit_battle_start(data, me)
+            self._emit_battle_start(data, me, silent=False)
         elif name == "ChampionKill":
             killer, victim = ev.get("KillerName"), ev.get("VictimName")
             assisters = ev.get("Assisters") or []
