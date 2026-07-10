@@ -227,7 +227,7 @@ class LolMapper:
         elif name == "GameEnd":
             outcome = "win" if str(ev.get("Result", "")).lower().startswith("win") else "loss"
             self._emit("battle_result", {"outcome": outcome, "silent": True},
-                       Priority.NORMAL, ttl_s=20)
+                       Priority.CRITICAL, ttl_s=20)
         # MinionsSpawning и прочее — сознательно игнорируем (спека §3.2).
 
     # --- дельты снапшота ----------------------------------------------------
