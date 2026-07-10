@@ -33,6 +33,49 @@ def make():
     return LolMapper(submit=stims.append), stims
 
 
+class RecLog:
+    """Фейковый журнал: запоминает старты матчей и имена событий."""
+
+    def __init__(self):
+        self.games = []
+        self.events = []
+
+    def start_game(self, meta):
+        self.games.append(meta)
+
+    def log_event(self, ev):
+        self.events.append(ev.get("EventName"))
+
+    def close(self):
+        pass
+
+
+def test_event_log_records_all_journal_events():
+    rec = RecLog()
+    stims = []
+    m = LolMapper(submit=stims.append, event_log=rec)
+    m.handle_payload(payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "ChampionKill", "KillerName": ME, "VictimName": ENEMY},
+        {"EventID": 2, "EventName": "SomeUnknownEvent"},  # необработанное — тоже пишем
+    ], game_time=5.0))
+    # Логируем каждое свежее событие журнала, включая неизвестные мапперу.
+    assert rec.events == ["GameStart", "ChampionKill", "SomeUnknownEvent"]
+    assert len(rec.games) == 1 and rec.games[0]["champion"] == "Garen"
+
+
+def test_event_log_rotates_on_new_match():
+    rec = RecLog()
+    stims = []
+    m = LolMapper(submit=stims.append, event_log=rec)
+    # Подключение посреди матча — старт матча зафиксирован, историю не логируем.
+    m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=900.0))
+    assert len(rec.games) == 1 and rec.events == []
+    # gameTime пошёл назад — новый матч, новый файл журнала.
+    m.handle_payload(payload(events=[{"EventID": 0, "EventName": "GameStart"}], game_time=3.0))
+    assert len(rec.games) == 2
+
+
 def test_fresh_game_emits_speaking_battle_start():
     m, stims = make()
     m.handle_payload(payload(
@@ -115,6 +158,36 @@ def test_objectives_sides_and_steal():
     assert by_type["turret"].type == "turret"
     assert by_type["ace"].payload["side"] == "theirs"
     assert by_type["battle_result"].payload == {"outcome": "win", "silent": True}
+
+
+def test_events_without_riot_tag_still_attributed():
+    # Регрессия: журнал шлёт имя без Riot-тэга («Streamer» вместо «Streamer#RU1»),
+    # что не совпадало с riotId в allPlayers — фраг молчал, дракон уходил «врагу».
+    m, stims = make()
+    events = [
+        {"EventID": 0, "EventName": "GameStart"},
+        # киллер без тэга и в другом регистре — всё равно это стример
+        {"EventID": 1, "EventName": "ChampionKill", "KillerName": "streamer",
+         "VictimName": "Enemy"},
+        {"EventID": 2, "EventName": "DragonKill", "KillerName": "Streamer",
+         "DragonType": "Fire"},
+    ]
+    m.handle_payload(payload(events=events, game_time=10.0))
+    by_type = {s.type: s for s in stims}
+    assert by_type["frag"].payload["target"] == "Darius"       # килл озвучен
+    assert by_type["objective"].payload["side"] == "ours"      # дракон — наш
+
+
+def test_objective_by_unknown_killer_is_not_blamed_on_enemy():
+    m, stims = make()
+    events = [
+        {"EventID": 0, "EventName": "GameStart"},
+        # киллер, которого нет в allPlayers — сторону честно не знаем
+        {"EventID": 1, "EventName": "BaronKill", "KillerName": "SomeoneElse#XX1"},
+    ]
+    m.handle_payload(payload(events=events, game_time=10.0))
+    obj = [s for s in stims if s.type == "objective"][0]
+    assert obj.payload["side"] == "unknown"  # не «theirs»
 
 
 def test_new_match_resets_cursor():

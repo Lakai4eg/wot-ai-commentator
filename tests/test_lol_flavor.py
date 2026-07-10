@@ -26,8 +26,11 @@ def test_fallback_covers_all_lol_types():
 def test_objective_sides_and_steal_note():
     ours = describe_event(game("objective", kind="барон", side="ours", stolen=False))
     theirs = describe_event(game("objective", kind="дракон (Fire)", side="theirs", stolen=True))
+    unknown = describe_event(game("objective", kind="дракон", side="unknown"))
     assert "стримера" in ours and "барон" in ours
     assert "Противник" in theirs and "УКРАДЕН" in theirs
+    # unknown — нейтрально, без ложного «противник забрал»
+    assert "Противник" not in unknown and "дракон" in unknown
 
 
 def test_flavor_mentions_lol():

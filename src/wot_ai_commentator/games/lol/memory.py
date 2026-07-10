@@ -114,10 +114,12 @@ class LolSessionMemory:
                 self.first_bloods += 1
                 facts.append("первая кровь матча — за стримером")
         elif t == "objective":
-            if p.get("side") == "ours":
+            side = p.get("side")
+            if side == "ours":
                 b.objectives[str(p.get("kind") or "объект")] += 1
-            else:
+            elif side == "theirs":
                 b.lost_objectives += 1
+            # unknown — сторона не определена, не приписываем никому
         elif t == "turret":
             b.turrets += 1
         elif t == "inhib":

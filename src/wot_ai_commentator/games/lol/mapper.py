@@ -14,6 +14,7 @@ from collections import deque
 from typing import Any, Callable
 
 from ...events import Priority, Stimulus
+from .event_log import NullEventLog
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +32,10 @@ _OBJECTIVE_KINDS = {"DragonKill": "дракон", "HeraldKill": "герольд"
 class LolMapper:
     """Переводит снапшоты Live Client API в игровые стимулы."""
 
-    def __init__(self, submit: Callable[[Stimulus], None]) -> None:
+    def __init__(self, submit: Callable[[Stimulus], None], event_log: Any = None) -> None:
         self.submit = submit
+        # Пофайловый журнал сырых событий (по файлу на матч); None — без журнала.
+        self._event_log = event_log if event_log is not None else NullEventLog()
         self._events_found = 0
         self._last_events: deque[str] = deque(maxlen=12)
         self._game_time = 0.0
@@ -78,34 +81,62 @@ class LolMapper:
     # --- вспомогательное --------------------------------------------------
 
     @staticmethod
+    def _name_key(name: Any) -> str:
+        """Ключ имени: без Riot-тэга «#EUW» и в нижнем регистре.
+
+        События журнала (KillerName/VictimName) часто присылают имя без тэга
+        или в другом регистре, чем allPlayers/activePlayer (riotId «Имя#ТЭГ»).
+        Без нормализации киллы/объекты не атрибутируются, и объект ложно
+        уходит «противнику» (см. _side_of).
+        """
+        if not name:
+            return ""
+        return str(name).split("#", 1)[0].strip().casefold()
+
+    @staticmethod
+    def _matches(name: Any, player: dict | None) -> bool:
+        if not name or not isinstance(player, dict):
+            return False
+        key = LolMapper._name_key(name)
+        if not key:
+            return False
+        return any(LolMapper._name_key(ident) == key
+                   for ident in (player.get("riotId"), player.get("summonerName")))
+
+    @staticmethod
     def _identify_me(data: dict, players: list) -> dict | None:
         active = data.get("activePlayer") or {}
         name = active.get("riotId") or active.get("summonerName")
         if not name:
             return None
         for p in players:
-            if isinstance(p, dict) and name in (p.get("riotId"), p.get("summonerName")):
+            if LolMapper._matches(name, p):
                 return p
         return None
 
     @staticmethod
     def _is_me(name: Any, me: dict | None) -> bool:
-        return bool(me and name and name in (me.get("riotId"), me.get("summonerName")))
+        return LolMapper._matches(name, me)
 
     @staticmethod
     def _champion_of(name: Any, players: list) -> str:
         for p in players:
-            if isinstance(p, dict) and name in (p.get("riotId"), p.get("summonerName")):
+            if LolMapper._matches(name, p):
                 return p.get("championName") or str(name)
         return str(name) if name else "неизвестный"
 
     def _side_of(self, killer_name: Any, me: dict | None, players: list) -> str:
-        """ours, если убийца в команде стримера; неизвестное — theirs."""
+        """ours — убийца в команде стримера, theirs — во вражеской.
+
+        Если убийцу не удалось сопоставить ни с одним игроком, возвращаем
+        unknown: врать «забрал противник» нельзя (это и была причина ложных
+        комментариев про дракона).
+        """
         my_team = (me or {}).get("team")
         for p in players:
-            if isinstance(p, dict) and killer_name in (p.get("riotId"), p.get("summonerName")):
+            if self._matches(killer_name, p):
                 return "ours" if my_team and p.get("team") == my_team else "theirs"
-        return "theirs"
+        return "unknown"
 
     def _emit(self, type_: str, payload: dict,
               priority: Priority = Priority.NORMAL, ttl_s: float = 20.0) -> None:
@@ -125,11 +156,11 @@ class LolMapper:
             return
         self._started = True
         gd = data.get("gameData") or {}
-        self._emit(
-            "battle_start",
-            {"map": gd.get("mapName"), "mode": gd.get("gameMode"),
-             "champion": (me or {}).get("championName"), "silent": silent},
-        )
+        meta = {"map": gd.get("mapName"), "mode": gd.get("gameMode"),
+                "champion": (me or {}).get("championName")}
+        # Начало матча — единственная точка на игру: заводим новый файл журнала.
+        self._event_log.start_game({**meta, "silent": silent})
+        self._emit("battle_start", {**meta, "silent": silent})
 
     # --- журнал событий ----------------------------------------------------
 
@@ -160,6 +191,9 @@ class LolMapper:
                 self._dispatch_event(e, data, me, players)
             except Exception:
                 log.exception("LolMapper: событие %r сломало обработку", e.get("EventName"))
+            # После диспатча: GameStart уже открыл файл матча, событие туда пишем.
+            # Логируем все события, включая необработанные (чтобы поймать личинки).
+            self._event_log.log_event(e)
 
     def _dispatch_event(self, ev: dict, data: dict, me: dict | None, players: list) -> None:
         name = ev.get("EventName")

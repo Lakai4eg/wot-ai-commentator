@@ -49,8 +49,10 @@ def describe_event(stimulus: Stimulus) -> str:
     p.setdefault("kind", "объект")
     p["champion_ru"] = p.get("champion") or "своего чемпиона"
     side = p.get("side", "ours")
-    p["side_ru"] = ("Команда стримера забрала объект" if side == "ours"
-                    else "Противник забрал объект")
+    p["side_ru"] = {
+        "ours": "Команда стримера забрала объект",
+        "theirs": "Противник забрал объект",
+    }.get(side, "На карте взяли объект")  # unknown — не приписываем сторону
     p["stolen_note"] = (" Объект УКРАДЕН из-под носа — драма!" if p.get("stolen") else "")
     p["note"] = ("её забрал стример" if p.get("by_me")
                  else f"её забрал {p.get('actor', 'кто-то')}")
