@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #101014;
+  color: #e8e8ec;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.panel {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+h1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 26px;
+}
+
+h2 {
+  font-size: 16px;
+  color: #ffb454;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin: 0 0 12px;
+}
+
+section {
+  background: #17171d;
+  border: 1px solid #26262e;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+label { display: block; margin-bottom: 10px; font-size: 14px; color: #b9b9c3; }
+
+input, select, button {
+  font: inherit;
+  background: #101014;
+  color: #e8e8ec;
+  border: 1px solid #33333d;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+input:focus, select:focus { outline: 1px solid #ffb454; }
+
+button {
+  cursor: pointer;
+  background: #26262e;
+}
+button:hover { background: #33333d; }
+button.danger { color: #ff7a7a; }
+
+.row { display: flex; gap: 8px; margin-top: 4px; }
+.row input { flex: 1; }
+.row.wrap { flex-wrap: wrap; align-items: center; }
+.check { display: flex; align-items: center; gap: 6px; margin: 0; }
+
+.badges { display: flex; gap: 6px; }
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 99px;
+  letter-spacing: 1px;
+}
+.badge-ok { background: rgba(84, 255, 155, 0.12); color: #54ff9b; }
+.badge-bad { background: rgba(255, 84, 84, 0.12); color: #ff7a7a; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #26262e; }
+th { color: #8a8a95; font-weight: 500; }
+
+.hint { color: #8a8a95; font-size: 13px; }
+.memory { margin: 0; padding-left: 18px; font-size: 14px; }
+.message {
+  background: rgba(255, 180, 84, 0.12);
+  color: #ffb454;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}

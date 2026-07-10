@@ -1,0 +1,259 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, ChatUser, SettingsDto, StatusDto } from "../shared/api";
+
+function Badge({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
+  return (
+    <span className={`badge ${ok ? "badge-ok" : "badge-bad"}`} title={detail}>
+      {label}
+    </span>
+  );
+}
+
+export function Panel() {
+  const [settings, setSettings] = useState<SettingsDto | null>(null);
+  const [users, setUsers] = useState<ChatUser[]>([]);
+  const [status, setStatus] = useState<StatusDto>({});
+  const [apiKey, setApiKey] = useState("");
+  const [newUser, setNewUser] = useState("");
+  const [newRole, setNewRole] = useState<"director" | "admin">("director");
+  const [message, setMessage] = useState("");
+
+  const refreshUsers = useCallback(() => {
+    api.listUsers().then(setUsers).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.getSettings().then(setSettings).catch(() => setMessage("Сервер недоступен"));
+    refreshUsers();
+    const t = setInterval(() => api.getStatus().then(setStatus).catch(() => {}), 2000);
+    return () => clearInterval(t);
+  }, [refreshUsers]);
+
+  if (!settings) return <div className="panel">Загрузка…</div>;
+
+  const LLM_FIELDS = [
+    "llm_provider", "gemini_api_key", "gemini_model",
+    "openai_base_url", "openai_api_key", "openai_model",
+  ];
+
+  const patch = async (p: Partial<SettingsDto>) => {
+    try {
+      setSettings(await api.putSettings(p));
+      // Смена модели/провайдера/ключа — сразу проверяем LLM живым запросом.
+      if (Object.keys(p).some((k) => LLM_FIELDS.includes(k))) {
+        setMessage("Проверяю LLM…");
+        const t = await api.testLlm();
+        setMessage(t.ok ? `LLM отвечает: «${t.reply}»` : `LLM не отвечает: ${t.error}`);
+        api.getStatus().then(setStatus).catch(() => {});
+        setTimeout(() => setMessage(""), 5000);
+      } else {
+        setMessage("Сохранено");
+        setTimeout(() => setMessage(""), 1500);
+      }
+    } catch (e) {
+      setMessage(String(e));
+    }
+  };
+
+  const addUser = async () => {
+    if (!newUser.trim()) return;
+    try {
+      await api.addUser(newUser.trim(), newRole);
+      setNewUser("");
+      refreshUsers();
+    } catch (e) {
+      setMessage(String(e));
+    }
+  };
+
+  return (
+    <div className="panel">
+      <h1>
+        WoT AI Commentator
+        <span className="badges">
+          <Badge
+            label="wotstat"
+            ok={status.wotstat?.status === "connected"}
+            detail={status.wotstat ? `${status.wotstat.status} (${status.wotstat.game_state ?? "?"})` : undefined}
+          />
+          <Badge label="чат" ok={status.chat === "connected"} detail={status.chat} />
+          <Badge
+            label={status.llm_provider ? `LLM: ${status.llm_provider}` : "LLM"}
+            ok={!!status.llm_configured && !status.llm_last_error}
+            detail={status.llm_last_error ?? (status.llm_configured ? "ok" : "не настроен")}
+          />
+          <Badge label="голос" ok={!!status.tts} detail={status.tts_status} />
+        </span>
+      </h1>
+      {message && <div className="message">{message}</div>}
+
+      <section>
+        <h2>Подключения</h2>
+        <label className="check">
+          LLM-провайдер
+          <select
+            value={settings.llm_provider}
+            onChange={(e) => patch({ llm_provider: e.target.value as SettingsDto["llm_provider"] })}
+          >
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI-совместимый</option>
+          </select>
+        </label>
+        {settings.llm_provider === "gemini" && (
+          <>
+            <label>
+              API-ключ Gemini
+              <div className="row">
+                <input
+                  type="password"
+                  value={apiKey}
+                  placeholder={settings.gemini_api_key ? "сохранён" : "AIza…"}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+                <button onClick={() => apiKey && patch({ gemini_api_key: apiKey })}>Сохранить</button>
+              </div>
+            </label>
+            <label>
+              Модель Gemini
+              <input
+                value={settings.gemini_model}
+                onChange={(e) => setSettings({ ...settings, gemini_model: e.target.value })}
+                onBlur={(e) => patch({ gemini_model: e.target.value.trim() })}
+              />
+            </label>
+          </>
+        )}
+        {settings.llm_provider === "openai" && (
+          <>
+            <label>
+              Base URL (Например: Ollama Cloud: https://ollama.com/v1)
+              <input
+                value={settings.openai_base_url}
+                onChange={(e) => setSettings({ ...settings, openai_base_url: e.target.value })}
+                onBlur={(e) => patch({ openai_base_url: e.target.value.trim() })}
+              />
+            </label>
+            <label>
+              API-ключ (Ollama Cloud — ключ с ollama.com; локальному Ollama не нужен)
+              <div className="row">
+                <input
+                  type="password"
+                  value={apiKey}
+                  placeholder={settings.openai_api_key ? "сохранён" : "ключ провайдера"}
+                  onChange={(e) => setApiKey(e.target.value)}
+                />
+                <button onClick={() => apiKey && patch({ openai_api_key: apiKey })}>Сохранить</button>
+              </div>
+            </label>
+            <label>
+              Модель (Ollama: gpt-oss:20b, qwen3:8b и т.п.)
+              <input
+                value={settings.openai_model}
+                onChange={(e) => setSettings({ ...settings, openai_model: e.target.value })}
+                onBlur={(e) => patch({ openai_model: e.target.value.trim() })}
+              />
+            </label>
+          </>
+        )}
+        <label>
+          Канал Twitch (перезапуск приложения для применения)
+          <input
+            value={settings.twitch_channel}
+            onChange={(e) => setSettings({ ...settings, twitch_channel: e.target.value })}
+            onBlur={(e) => patch({ twitch_channel: e.target.value.trim() })}
+          />
+        </label>
+      </section>
+
+      <section>
+        <h2>Режиссёр</h2>
+        <div className="row wrap">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.text_enabled}
+              onChange={(e) => patch({ text_enabled: e.target.checked })}
+            />
+            Текст
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.voice_enabled}
+              onChange={(e) => patch({ voice_enabled: e.target.checked })}
+            />
+            Голос
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.chat_commands_enabled}
+              onChange={(e) => patch({ chat_commands_enabled: e.target.checked })}
+            />
+            Чат-команды
+          </label>
+        </div>
+        {status.director && (
+          <p className="hint">
+            очередь: {status.director.queue_len}, реплик за минуту: {status.director.replicas_last_minute}
+            {status.director.muted_until ? ", ЗАМЬЮЧЕН" : ""}
+          </p>
+        )}
+      </section>
+
+      <section>
+        <h2>Белый список чата</h2>
+        <div className="row">
+          <input
+            placeholder="ник"
+            value={newUser}
+            onChange={(e) => setNewUser(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addUser()}
+          />
+          <select value={newRole} onChange={(e) => setNewRole(e.target.value as "director" | "admin")}>
+            <option value="director">director</option>
+            <option value="admin">admin</option>
+          </select>
+          <button onClick={addUser}>Добавить</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Ник</th><th>Роль</th><th>Добавлен</th><th /></tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td>{u.username}</td>
+                <td>{u.role}</td>
+                <td>{u.added_at.slice(0, 10)}</td>
+                <td>
+                  <button
+                    className="danger"
+                    onClick={() => api.deleteUser(u.platform, u.username).then(refreshUsers)}
+                  >
+                    удалить
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && (
+              <tr><td colSpan={4} className="hint">пусто — команды чата никому не доступны</td></tr>
+            )}
+          </tbody>
+        </table>
+        <p className="hint">
+          Команды: !dir &lt;текст&gt;, !roast, !hype, !stats — роль director;
+          !mute 10m — только admin.
+        </p>
+      </section>
+
+      <section>
+        <h2>Память сессии</h2>
+        <ul className="memory">
+          {(status.memory ?? []).map((line, i) => <li key={i}>{line}</li>)}
+          {(status.memory ?? []).length === 0 && <li className="hint">пока пусто</li>}
+        </ul>
+      </section>
+    </div>
+  );
+}
