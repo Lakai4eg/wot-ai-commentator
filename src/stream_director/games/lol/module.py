@@ -9,7 +9,7 @@ from ...stimulus import Stimulus
 from ..base import GameModule
 from .client import LiveClientPoller
 from .event_log import LolEventLog
-from .flavor import describe_event, fallback_line, flavor_lines
+from .flavor import describe_event, fallback_line, flavor_lines, joke_angles
 from .mapper import LolMapper
 from .memory import LolSessionMemory
 
@@ -35,4 +35,5 @@ def build_module(
         fallback_line=fallback_line,
         always_speak_types=frozenset({"battle_start", "death", "multikill"}),
         diag=lambda: mapper.diag,
+        joke_angles=joke_angles,
     )

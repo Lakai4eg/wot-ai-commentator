@@ -325,3 +325,181 @@ def test_low_hp_silent_once_per_life():
     m.handle_payload(payload(game_time=51.0, hp=(90.0, 1000.0)))
     low = [s for s in stims if s.type == "low_hp"]
     assert len(low) == 1 and low[0].payload["silent"] is True
+
+
+def team_payload(ally=(0, 0), me_scores=(0, 0, 0), enemy=(0, 0),
+                 game_time=100.0, events=()):
+    """Снапшот с настраиваемыми счетами. ally/enemy — (kills, deaths)."""
+    k, d, a = me_scores
+    return {
+        "activePlayer": {
+            "riotId": ME,
+            "championStats": {"currentHealth": 1000.0, "maxHealth": 1000.0},
+        },
+        "allPlayers": [
+            {"riotId": ME, "championName": "Garen", "team": "ORDER",
+             "isDead": False, "scores": {"kills": k, "deaths": d, "assists": a}},
+            {"riotId": ALLY, "championName": "Lux", "team": "ORDER",
+             "isDead": False,
+             "scores": {"kills": ally[0], "deaths": ally[1], "assists": 0}},
+            {"riotId": ENEMY, "championName": "Darius", "team": "CHAOS",
+             "isDead": False,
+             "scores": {"kills": enemy[0], "deaths": enemy[1], "assists": 0}},
+        ],
+        "events": {"Events": list(events)},
+        "gameData": {"gameMode": "CLASSIC", "mapName": "Map11",
+                     "gameTime": game_time},
+    }
+
+
+def types_of(stims):
+    return [s.type for s in stims]
+
+
+def test_team_state_silent_on_score_change():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))  # первый снапшот — тихий синк
+    assert "team_state" not in types_of(stims)
+    m.handle_payload(team_payload(ally=(1, 0)))  # счёт изменился
+    ts = [s for s in stims if s.type == "team_state"]
+    assert len(ts) == 1
+    assert ts[0].payload["silent"] is True
+    assert ts[0].payload["allies"] == [{"champion": "Lux", "kills": 1, "deaths": 0}]
+    m.handle_payload(team_payload(ally=(1, 0)))  # без изменений — молчим
+    assert len([s for s in stims if s.type == "team_state"]) == 1
+
+
+def test_ally_feeding_thresholds_5_8_11():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))
+    for deaths in range(1, 12):
+        m._last_ally_event_at = 0.0  # обнуляем интервал — проверяем сами пороги
+        m.handle_payload(team_payload(ally=(0, deaths)))
+    feeds = [s for s in stims if s.type == "ally_feeding"]
+    assert [f.payload["deaths"] for f in feeds] == [5, 8, 11]
+    assert feeds[0].payload["champion"] == "Lux"
+
+
+def test_ally_events_global_interval():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))
+    m.handle_payload(team_payload(ally=(0, 5)))   # фид — озвучен, интервал взведён
+    m.handle_payload(team_payload(ally=(0, 8)))   # порог достигнут, но интервал держит
+    feeds = [s for s in stims if s.type == "ally_feeding"]
+    assert [f.payload["deaths"] for f in feeds] == [5]
+    m._last_ally_event_at = 0.0                   # интервал «вышел»
+    m.handle_payload(team_payload(ally=(0, 8)))   # порог не потерян — озвучивается
+    feeds = [s for s in stims if s.type == "ally_feeding"]
+    assert [f.payload["deaths"] for f in feeds] == [5, 8]
+
+
+def test_ally_trackers_reset_on_new_game():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0), game_time=100.0))
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(0, 5), game_time=200.0))
+    assert types_of(stims).count("ally_feeding") == 1
+    # Время пошло назад — новый матч, пороги забыты.
+    m.handle_payload(team_payload(ally=(0, 0), game_time=5.0))
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(0, 5), game_time=20.0))
+    assert types_of(stims).count("ally_feeding") == 2
+
+
+def test_no_ally_events_for_enemies():
+    m, stims = make()
+    m.handle_payload(team_payload(enemy=(0, 0)))
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(enemy=(9, 9)))  # фидит противник — не наша тема
+    assert "ally_feeding" not in types_of(stims)
+
+
+def test_ally_multikill_becomes_ally_carrying():
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "Multikill", "KillerName": ALLY, "KillStreak": 3},
+    ], game_time=5.0))
+    carry = [s for s in stims if s.type == "ally_carrying"]
+    assert len(carry) == 1
+    assert carry[0].payload == {"champion": "Lux", "label": "трипл-килл", "count": 3}
+    # Своё multikill-событие не подменилось.
+    assert "multikill" not in types_of(stims)
+
+
+def test_enemy_multikill_ignored():
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "Multikill", "KillerName": ENEMY, "KillStreak": 3},
+    ], game_time=5.0))
+    assert "ally_carrying" not in types_of(stims)
+
+
+def test_ally_kill_lead_fires_once_per_game():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(8, 0), me_scores=(2, 0, 0)))
+    carry = [s for s in stims if s.type == "ally_carrying"]
+    assert len(carry) == 1
+    assert carry[0].payload == {"champion": "Lux", "kills": 8, "my_kills": 2}
+    # Отрыв растёт дальше — но подколка уже была, повторов нет.
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(12, 0), me_scores=(2, 0, 0)))
+    assert len([s for s in stims if s.type == "ally_carrying"]) == 1
+
+
+def test_ally_kill_lead_needs_both_thresholds():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))
+    m._last_ally_event_at = 0.0
+    # Отрыв 5, но киллов только 6 (< 8) — рано.
+    m.handle_payload(team_payload(ally=(6, 0), me_scores=(1, 0, 0)))
+    # Киллов 9, но отрыв 4 (< 5) — тоже рано.
+    m.handle_payload(team_payload(ally=(9, 0), me_scores=(5, 0, 0)))
+    assert "ally_carrying" not in types_of(stims)
+
+
+def test_team_gap_spectator_once():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0), game_time=100.0))
+    m._last_ally_event_at = 0.0
+    # До 10-й минуты — рано, даже если команда воюет.
+    m.handle_payload(team_payload(ally=(6, 0), game_time=500.0))
+    assert "team_gap" not in types_of(stims)
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(6, 0), game_time=650.0))
+    gaps = [s for s in stims if s.type == "team_gap"]
+    assert len(gaps) == 1
+    assert gaps[0].payload == {"kind": "spectator", "team_kills": 6}
+    # Повторно не срабатывает.
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(7, 0), game_time=700.0))
+    assert len([s for s in stims if s.type == "team_gap"
+                and s.payload["kind"] == "spectator"]) == 1
+
+
+def test_team_gap_spectator_needs_zero_score():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0), game_time=100.0))
+    m._last_ally_event_at = 0.0
+    # У стримера есть ассист — он не «наблюдатель».
+    m.handle_payload(team_payload(ally=(6, 0), me_scores=(0, 0, 1), game_time=650.0))
+    assert "team_gap" not in types_of(stims)
+
+
+def test_team_gap_behind_once():
+    m, stims = make()
+    m.handle_payload(team_payload(ally=(0, 0)))
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(1, 0), me_scores=(1, 0, 0), enemy=(9, 0)))
+    assert "team_gap" not in types_of(stims)  # разрыв 7 — мало
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(1, 0), me_scores=(1, 0, 0), enemy=(12, 0)))
+    gaps = [s for s in stims if s.type == "team_gap"]
+    assert len(gaps) == 1
+    assert gaps[0].payload == {"kind": "behind", "diff": 10}
+    m._last_ally_event_at = 0.0
+    m.handle_payload(team_payload(ally=(1, 0), me_scores=(1, 0, 0), enemy=(15, 0)))
+    assert len([s for s in stims if s.type == "team_gap"]) == 1

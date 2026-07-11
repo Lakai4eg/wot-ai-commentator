@@ -25,6 +25,16 @@ _FRESH_GAME_S = 30.0
 # Антидубль смерти: isDead-страховка молчит, если death уже был недавно.
 _DEATH_DEDUP_S = 3.0
 
+# Подколки союзников: пороги и глобальный интервал (анти-спам TTS).
+_ALLY_FEED_START = 5     # первая подколка фидера
+_ALLY_FEED_STEP = 3      # дальше на каждых +3 смертях (5, 8, 11…)
+_ALLY_LEAD_MIN_KILLS = 8  # керри: минимум киллов союзника…
+_ALLY_LEAD_GAP = 5        # …и отрыв от стримера
+_ALLY_EVENT_INTERVAL_S = 60.0  # не чаще одного союзного события в минуту
+_TEAM_GAP_TIME_S = 600.0       # «наблюдатель»: стример 0/0/0 к 10-й минуте
+_TEAM_GAP_TEAM_KILLS = 5       # …при этом команда уже навела шороху
+_TEAM_GAP_BEHIND_DIFF = 10     # команда отстаёт по киллам
+
 _MULTIKILL_LABELS = {2: "дабл-килл", 3: "трипл-килл", 4: "квадра-килл", 5: "пентакилл"}
 _OBJECTIVE_KINDS = {"DragonKill": "дракон", "HeraldKill": "герольд", "BaronKill": "барон"}
 
@@ -52,6 +62,13 @@ class LolMapper:
         self._death_count: int | None = None
         # Страховка озвучила смерть, а журнал её ещё не подтвердил.
         self._snapshot_death_pending = False
+        # Счёт союзников (kills, deaths) по ключу имени; None до первого
+        # снапшота — синхронизируемся молча, историю не переигрываем.
+        self._ally_scores: dict[str, tuple[int, int]] | None = None
+        self._ally_feed_voiced: dict[str, int] = {}  # последний озвученный порог
+        self._ally_lead_voiced: set[str] = set()
+        self._team_gap_voiced: set[str] = set()
+        self._last_ally_event_at = 0.0
 
     # --- диагностика ---------------------------------------------------
 
@@ -80,6 +97,7 @@ class LolMapper:
         me = self._identify_me(data, players)
         self._process_events(data, me, players)
         self._process_snapshot(data, me)
+        self._process_team(data, me, players)
 
     # --- вспомогательное --------------------------------------------------
 
@@ -224,14 +242,22 @@ class LolMapper:
                 self._emit("assist", {"target": self._champion_of(victim, players)},
                            Priority.LOW, ttl_s=10)
         elif name == "Multikill":
-            if self._is_me(ev.get("KillerName"), me):
-                streak = int(ev.get("KillStreak") or 2)
+            killer = ev.get("KillerName")
+            streak = int(ev.get("KillStreak") or 2)
+            label = _MULTIKILL_LABELS.get(streak, "мультикилл")
+            if self._is_me(killer, me):
                 self._emit(
                     "multikill",
-                    {"count": streak, "label": _MULTIKILL_LABELS.get(streak, "мультикилл")},
+                    {"count": streak, "label": label},
                     Priority.CRITICAL if streak >= 5 else Priority.HIGH,
                     ttl_s=20,
                 )
+            elif (self._side_of(killer, me, players) == "ours"
+                  and self._ally_event_ok()):
+                # Мультикилл союзника: хвалим его, подкалываем стримера.
+                self._emit_ally("ally_carrying",
+                                {"champion": self._champion_of(killer, players),
+                                 "label": label, "count": streak}, ttl_s=15)
         elif name == "FirstBlood":
             recipient = ev.get("Recipient")
             self._emit(
@@ -302,3 +328,104 @@ class LolMapper:
                 and not self._low_hp_flagged):
             self._low_hp_flagged = True
             self._emit("low_hp", {"silent": True}, Priority.NORMAL, ttl_s=8)
+
+    # --- команда: счёт союзников и поводы для подколок -----------------------
+
+    def _ally_event_ok(self) -> bool:
+        """Глобальный интервал союзных событий — не спамим озвучкой."""
+        return time.time() - self._last_ally_event_at >= _ALLY_EVENT_INTERVAL_S
+
+    def _emit_ally(self, type_: str, payload: dict, ttl_s: float = 20.0) -> None:
+        self._last_ally_event_at = time.time()
+        self._emit(type_, payload, Priority.NORMAL, ttl_s=ttl_s)
+
+    def _collect_team(self, me: dict, players: list) -> tuple[list[dict], int]:
+        """Союзники стримера (кроме него) и суммарные киллы противника."""
+        my_team = me.get("team")
+        me_key = self._name_key(me.get("riotId") or me.get("summonerName"))
+        allies: list[dict] = []
+        enemy_kills = 0
+        for p in players:
+            if not isinstance(p, dict):
+                continue
+            scores = p.get("scores") or {}
+            kills = int(scores.get("kills") or 0)
+            deaths = int(scores.get("deaths") or 0)
+            if p.get("team") != my_team:
+                enemy_kills += kills
+                continue
+            key = self._name_key(p.get("riotId") or p.get("summonerName"))
+            if not key or key == me_key:
+                continue
+            allies.append({"key": key, "champion": p.get("championName") or "союзник",
+                           "kills": kills, "deaths": deaths})
+        return allies, enemy_kills
+
+    def _process_team(self, data: dict, me: dict | None, players: list) -> None:
+        if me is None or not me.get("team"):
+            return
+        allies, enemy_kills = self._collect_team(me, players)
+        if not allies:
+            return
+
+        fresh = {a["key"]: (a["kills"], a["deaths"]) for a in allies}
+        if self._ally_scores is None:
+            self._ally_scores = fresh  # первый снапшот: молча синхронизируемся
+        elif fresh != self._ally_scores:
+            self._ally_scores = fresh
+            # Тихий стимул: память получает таблицу союзников, реплики нет.
+            self._emit("team_state",
+                       {"allies": [{k: a[k] for k in ("champion", "kills", "deaths")}
+                                   for a in allies],
+                        "silent": True},
+                       Priority.LOW, ttl_s=30)
+
+        self._check_ally_feeding(allies)
+
+        my_scores = me.get("scores") or {}
+        my_kills = int(my_scores.get("kills") or 0)
+        my_deaths = int(my_scores.get("deaths") or 0)
+        my_assists = int(my_scores.get("assists") or 0)
+        self._check_ally_lead(allies, my_kills)
+
+        team_kills = my_kills + sum(a["kills"] for a in allies)
+        if ("spectator" not in self._team_gap_voiced and self._ally_event_ok()
+                and self._game_time >= _TEAM_GAP_TIME_S
+                and my_kills == my_deaths == my_assists == 0
+                and team_kills >= _TEAM_GAP_TEAM_KILLS):
+            self._team_gap_voiced.add("spectator")
+            self._emit_ally("team_gap",
+                            {"kind": "spectator", "team_kills": team_kills})
+
+        if ("behind" not in self._team_gap_voiced and self._ally_event_ok()
+                and enemy_kills - team_kills >= _TEAM_GAP_BEHIND_DIFF):
+            self._team_gap_voiced.add("behind")
+            self._emit_ally("team_gap",
+                            {"kind": "behind", "diff": enemy_kills - team_kills})
+
+    def _check_ally_feeding(self, allies: list[dict]) -> None:
+        for a in allies:
+            if not self._ally_event_ok():
+                return  # интервал не вышел — пороги не сжигаем, дождёмся снапшота
+            deaths = a["deaths"]
+            if deaths < _ALLY_FEED_START:
+                continue
+            threshold = (_ALLY_FEED_START
+                         + (deaths - _ALLY_FEED_START) // _ALLY_FEED_STEP * _ALLY_FEED_STEP)
+            if threshold > self._ally_feed_voiced.get(a["key"], 0):
+                self._ally_feed_voiced[a["key"]] = threshold
+                self._emit_ally("ally_feeding",
+                                {"champion": a["champion"], "deaths": deaths})
+
+    def _check_ally_lead(self, allies: list[dict], my_kills: int) -> None:
+        for a in allies:
+            if not self._ally_event_ok():
+                return
+            if (a["kills"] >= _ALLY_LEAD_MIN_KILLS
+                    and a["kills"] - my_kills >= _ALLY_LEAD_GAP
+                    and a["key"] not in self._ally_lead_voiced):
+                # Один раз за игру на союзника: мишень шутки — стример.
+                self._ally_lead_voiced.add(a["key"])
+                self._emit_ally("ally_carrying",
+                                {"champion": a["champion"], "kills": a["kills"],
+                                 "my_kills": my_kills}, ttl_s=15)

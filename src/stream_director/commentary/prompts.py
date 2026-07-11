@@ -50,6 +50,7 @@ def build_prompt(
     stimulus: Stimulus,
     memory_lines: list[str],
     session_lines: list[str] | None = None,
+    recent_lines: list[str] | None = None,
 ) -> str:
     parts = [_PERSONA_CORE, module.flavor_lines(), ""]
 
@@ -64,6 +65,11 @@ def build_prompt(
             "но реплика должна быть прежде всего про текущий момент боя):"
         )
         parts.extend(f"- {line}" for line in session_lines)
+        parts.append("")
+
+    if recent_lines:
+        parts.append("Твои последние реплики — НЕ повторяй их формулировки, образы и шутки:")
+        parts.extend(f"- {line}" for line in recent_lines)
         parts.append("")
 
     if stimulus.kind == "chat_order" and stimulus.type == "dir":
@@ -81,5 +87,8 @@ def build_prompt(
 
     parts.append("")
     parts.append(f"Обращение к стримеру на этот раз: {random.choice(_ADDRESS_STYLES)}.")
+    angles = module.joke_angles() if module.joke_angles else ()
+    if angles:
+        parts.append(f"Угол шутки на этот раз: {random.choice(angles)}.")
     parts.append(_RULES)
     return "\n".join(parts)

@@ -58,3 +58,35 @@ def test_summary_is_battle_plus_session():
     m.register(game("frag", target="Darius"))
     m.register(game("battle_result", outcome="win", silent=True))
     assert m.summary_lines() == m.battle_lines() + m.session_lines()
+
+
+def test_team_state_notable_allies_in_lines():
+    mem = LolSessionMemory()
+    mem.register(game("battle_start", champion="Garen"))
+    mem.register(game("team_state", silent=True, allies=[
+        {"champion": "Yasuo", "kills": 2, "deaths": 7},
+        {"champion": "Lee Sin", "kills": 9, "deaths": 1},
+        {"champion": "Sona", "kills": 1, "deaths": 1},
+    ]))
+    lines = mem.battle_lines()
+    assert "союзник Lee Sin: 9/1 — тащит" in lines
+    assert "союзник Yasuo: 2/7 — фидит" in lines
+    assert not any("Sona" in line for line in lines)  # обычный счёт — не шумим
+
+
+def test_ally_lines_capped_at_two():
+    mem = LolSessionMemory()
+    mem.register(game("battle_start", champion="Garen"))
+    mem.register(game("team_state", silent=True, allies=[
+        {"champion": f"Champ{i}", "kills": 0, "deaths": 6} for i in range(4)
+    ]))
+    ally_lines = [line for line in mem.battle_lines() if line.startswith("союзник")]
+    assert len(ally_lines) == 2
+
+
+def test_allies_reset_on_battle_start():
+    mem = LolSessionMemory()
+    mem.register(game("team_state", silent=True,
+                      allies=[{"champion": "Yasuo", "kills": 0, "deaths": 9}]))
+    mem.register(game("battle_start", champion="Garen"))
+    assert not any("Yasuo" in line for line in mem.battle_lines())

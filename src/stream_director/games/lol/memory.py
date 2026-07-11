@@ -29,6 +29,8 @@ class LolBattleMemory:
         self.inhibs = 0
         self.low_hp_events = 0
         self.killers: Counter[str] = Counter()
+        # Последняя таблица союзников из team_state: {champion, kills, deaths}.
+        self.allies: list[dict] = []
 
     def lines(self) -> list[str]:
         out: list[str] = []
@@ -51,6 +53,16 @@ class LolBattleMemory:
             out.append(f"ингибиторов снесено стримером: {self.inhibs}")
         if self.low_hp_events:
             out.append(f"был на волоске: {self.low_hp_events} раз(а)")
+        notable: list[str] = []
+        for a in self.allies:
+            kills = int(a.get("kills") or 0)
+            deaths = int(a.get("deaths") or 0)
+            champ = a.get("champion") or "союзник"
+            if kills >= 6:
+                notable.append(f"союзник {champ}: {kills}/{deaths} — тащит")
+            elif deaths >= 4:
+                notable.append(f"союзник {champ}: {kills}/{deaths} — фидит")
+        out.extend(notable[:2])  # не больше двух строк — контекст, не простыня
         top = self.killers.most_common(1)
         if top and top[0][1] >= 2:
             out.append(f"главный обидчик в игре: «{top[0][0]}» ({top[0][1]} смертей)")
@@ -126,6 +138,8 @@ class LolSessionMemory:
             b.inhibs += 1
         elif t == "low_hp":
             b.low_hp_events += 1
+        elif t == "team_state":
+            b.allies = list(p.get("allies") or [])
         elif t == "battle_result":
             self.games += 1
             if p.get("outcome") == "win":

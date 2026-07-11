@@ -45,6 +45,8 @@ class GameModule:
     fallback_line: Callable[[Stimulus], str | None]  # шаблон при мёртвой LLM
     always_speak_types: frozenset[str]  # события в обход кулдауна
     diag: Callable[[], dict]  # диагностика маппера для /api/status
+    # Подсказки «угла шутки» для промпта; None — модуль ротацию не использует.
+    joke_angles: Callable[[], tuple[str, ...]] | None = None
 
 
 class ActiveGameTracker:

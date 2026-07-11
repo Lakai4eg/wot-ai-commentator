@@ -284,3 +284,21 @@ async def test_lol_multikill_bypasses_cooldown():
                       payload={"count": 5, "label": "пентакилл"}))
     await drain(d)
     assert [s.type for _, s in published] == ["frag", "multikill"]
+
+
+@pytest.mark.asyncio
+async def test_recent_replicas_fed_back_into_prompt():
+    """Прошлые реплики попадают в следующий промпт с запретом повтора."""
+    backend = FakeBackend(reply="Уникальная шутка про фраг")
+    d, published = make_director(backend)
+    d.submit(game("frag"))
+    await drain(d)
+    d.submit(game("frag"))
+    await drain(d)
+    assert len(published) == 2
+    assert "Уникальная шутка про фраг" in backend.prompts[1]
+    # «не повторяй их» — маркер блока истории (в ядре персоны уже есть
+    # общее «не повторяйся», по нему блок не отличить).
+    assert "не повторяй их" in backend.prompts[1].lower()
+    # В первый промпт истории ещё нет.
+    assert "не повторяй их" not in backend.prompts[0].lower()

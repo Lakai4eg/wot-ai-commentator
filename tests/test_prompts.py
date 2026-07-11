@@ -1,3 +1,4 @@
+import dataclasses
 import random
 
 from stream_director.commentary.prompts import build_prompt
@@ -60,3 +61,29 @@ def test_address_style_rotates_across_replicas():
         for _ in range(30)
     }
     assert len(hints) > 1  # обращение реально меняется от реплики к реплике
+
+
+def test_recent_lines_block_present():
+    # «не повторяй их» — маркер именно блока истории: в ядре персоны уже
+    # есть общее «не повторяйся», по нему блок не отличить.
+    p = build_prompt(MODULE, game("frag"), [],
+                     recent_lines=["Первая реплика.", "Вторая реплика."])
+    assert "не повторяй их" in p.lower()
+    assert "Первая реплика." in p and "Вторая реплика." in p
+
+
+def test_no_recent_block_when_empty():
+    p = build_prompt(MODULE, game("frag"), [], recent_lines=[])
+    assert "не повторяй их" not in p.lower()
+
+
+def test_joke_angle_line_when_module_provides():
+    module = dataclasses.replace(MODULE, joke_angles=lambda: ("угол-тест",))
+    p = build_prompt(module, game("frag"), [])
+    assert "Угол шутки на этот раз: угол-тест." in p
+
+
+def test_no_joke_angle_without_field():
+    # WoT-модуль поле не задаёт — строки угла быть не должно.
+    p = build_prompt(MODULE, game("frag"), [])
+    assert "Угол шутки" not in p

@@ -8,6 +8,7 @@ import itertools
 import logging
 import random
 import time
+from collections import deque
 from typing import Awaitable, Callable
 
 from .commentary.base import CommentaryBackend
@@ -44,6 +45,8 @@ class Director:
         self._last_replica_at = 0.0
         self._last_game_event_at = 0.0  # для дебаунса: когда сыпались события
         self._replica_times: list[float] = []
+        # Последние озвученные реплики — в промпт, чтобы LLM не повторялась.
+        self._recent_replicas: deque[str] = deque(maxlen=8)
         self._wakeup = asyncio.Event()
         self._running = False
 
@@ -122,7 +125,8 @@ class Director:
         memory_lines = facts + module.memory.battle_lines()
         want_session = random.random() < self.SESSION_TEASE_PROB
         session_lines = module.memory.session_lines() if want_session else []
-        prompt = build_prompt(module, stimulus, memory_lines, session_lines)
+        prompt = build_prompt(module, stimulus, memory_lines, session_lines,
+                              recent_lines=list(self._recent_replicas))
         text = await self.backend.generate(prompt)
 
         if text is None:
@@ -136,6 +140,7 @@ class Director:
         if stimulus.expired():
             return True
 
+        self._recent_replicas.append(text)
         self._last_replica_at = time.time()
         # Держим только последнюю минуту — иначе список растёт весь стрим.
         self._replica_times = [
