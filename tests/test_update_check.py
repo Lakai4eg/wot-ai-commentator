@@ -76,3 +76,21 @@ async def test_apply_update_status_no_update_no_key():
     statuses: dict = {}
     await apply_update_status(statuses, "0.1.0", transport=_transport(handler))
     assert "update_available" not in statuses
+
+
+async def test_fetch_update_follows_rename_redirect():
+    # Переименование репозитория: GitHub API отдаёт 301 на новый адрес —
+    # проверка обязана дойти до него, а не молча вернуть None.
+    def handler(request):
+        if "old-name" in str(request.url):
+            return httpx.Response(
+                301, headers={"Location": "https://api.github.com/repos/o/new/releases/latest"}
+            )
+        return httpx.Response(200, json={"tag_name": "v9.9.9", "html_url": "u"})
+
+    info = await fetch_update(
+        "0.1.0",
+        url="https://api.github.com/repos/o/old-name/releases/latest",
+        transport=_transport(handler),
+    )
+    assert info == {"version": "9.9.9", "url": "u"}

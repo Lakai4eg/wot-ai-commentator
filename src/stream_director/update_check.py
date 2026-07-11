@@ -13,7 +13,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 GITHUB_LATEST_URL = (
-    "https://api.github.com/repos/Lakai4eg/wot-ai-commentator/releases/latest"
+    "https://api.github.com/repos/Lakai4eg/game-ai-commentator/releases/latest"
 )
 
 
@@ -39,7 +39,11 @@ async def fetch_update(
 ) -> dict | None:
     """Свежайший релиз новее current → {"version", "url"}, иначе None."""
     try:
-        async with httpx.AsyncClient(timeout=5.0, transport=transport) as client:
+        # follow_redirects: при переименовании репозитория GitHub API отвечает
+        # 301, а httpx по умолчанию редиректы не ходит — проверка молча умирала бы.
+        async with httpx.AsyncClient(
+            timeout=5.0, transport=transport, follow_redirects=True
+        ) as client:
             r = await client.get(url, headers={"Accept": "application/vnd.github+json"})
             r.raise_for_status()
             data = r.json()
