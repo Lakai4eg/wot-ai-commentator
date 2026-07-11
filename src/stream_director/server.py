@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from . import __version__
 from .broadcast import OverlayBroadcaster
+from .chat.twitch import TwitchChatReader
 from .commentary.switch import SwitchBackend
 from .config import Settings, save_settings
 from .db import ROLES, ChatUserDB
@@ -37,6 +38,7 @@ class AppContext:
     broadcaster: OverlayBroadcaster
     tracker: ActiveGameTracker | None = None
     backend: SwitchBackend | None = None
+    chat: TwitchChatReader | None = None
     statuses: dict[str, Any] = field(default_factory=dict)
     # Свежая диагностика по запросу /api/status — вместо фонового полла.
     refresh_status: Callable[[], None] | None = None
@@ -108,6 +110,8 @@ def create_app(ctx: AppContext) -> FastAPI:
             setattr(ctx.settings, key, value)
         if ctx.backend is not None:
             ctx.backend.apply(data)
+        if "twitch_channel" in data and ctx.chat is not None:
+            ctx.chat.set_channel(data["twitch_channel"])
         save_settings(ctx.settings, ctx.settings_path)
         return _masked_settings(ctx.settings)
 

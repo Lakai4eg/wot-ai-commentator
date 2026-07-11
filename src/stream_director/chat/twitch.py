@@ -32,14 +32,29 @@ class TwitchChatReader:
         self.on_message = on_message
         self.status = "disconnected"
         self._running = False
+        self._writer: asyncio.StreamWriter | None = None
+        self._wake = asyncio.Event()
+
+    def set_channel(self, channel: str) -> None:
+        """Горячая смена канала: рвём соединение, run() переподключится сразу."""
+        new = channel.strip().lstrip("#").lower()
+        if new == self.channel:
+            return
+        self.channel = new
+        self._wake.set()
+        if self._writer is not None:
+            self._writer.close()
 
     async def run(self) -> None:
-        if not self.channel:
-            log.info("Канал Twitch не задан — чат отключён")
-            return
         self._running = True
         backoff = 2.0
         while self._running:
+            if not self.channel:
+                self.status = "disconnected"
+                log.info("Канал Twitch не задан — жду настройки из панели")
+                await self._wake.wait()
+                self._wake.clear()
+                continue
             try:
                 self.status = "connecting"
                 await self._session()
@@ -52,11 +67,16 @@ class TwitchChatReader:
                 log.exception("Неожиданная ошибка чата, реконнект через %.0f с", backoff)
             self.status = "disconnected"
             if self._running:
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60.0)
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=backoff)
+                    backoff = 2.0  # разбудила смена канала — подключаемся сразу
+                except asyncio.TimeoutError:
+                    backoff = min(backoff * 2, 60.0)
+                self._wake.clear()
 
     async def _session(self) -> None:
         reader, writer = await asyncio.open_connection(HOST, PORT)
+        self._writer = writer
         try:
             nick = f"justinfan{random.randint(10000, 99999)}"
             writer.write(f"NICK {nick}\r\nJOIN #{self.channel}\r\n".encode())
@@ -79,7 +99,9 @@ class TwitchChatReader:
                     except Exception:
                         log.exception("Обработчик сообщения чата упал")
         finally:
+            self._writer = None
             writer.close()
 
     def stop(self) -> None:
         self._running = False
+        self._wake.set()

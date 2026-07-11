@@ -104,6 +104,11 @@ async def run() -> None:
     tracker = ActiveGameTracker(default="wot")
     broadcaster = OverlayBroadcaster(settings)
     director = Director(settings, backend, broadcaster.publish, tracker)
+
+    # Чат
+    router = ChatRouter(db, director, settings)
+    chat = TwitchChatReader(settings.twitch_channel, router.handle)
+
     ctx = AppContext(
         settings=settings,
         settings_path=SETTINGS_PATH,
@@ -112,6 +117,7 @@ async def run() -> None:
         broadcaster=broadcaster,
         tracker=tracker,
         backend=backend,
+        chat=chat,
     )
 
     # Игровые модули: источники всегда запущены, активную игру решает трекер.
@@ -130,10 +136,6 @@ async def run() -> None:
 
     asyncio.get_running_loop().run_in_executor(None, load_tts)
     ctx.statuses["tts_status"] = "loading"
-
-    # Чат
-    router = ChatRouter(db, director, settings)
-    chat = TwitchChatReader(settings.twitch_channel, router.handle)
 
     # Диагностика источников/чата/LLM — вызывается на каждый GET /api/status.
     def refresh_statuses() -> None:

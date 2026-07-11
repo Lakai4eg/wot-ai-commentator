@@ -9,6 +9,7 @@ from stream_director.broadcast import OverlayBroadcaster
 from stream_director.commentary.gemini import GeminiBackend
 from stream_director.commentary.openai_compat import OpenAICompatBackend
 from stream_director.commentary.switch import SwitchBackend
+from stream_director.chat.twitch import TwitchChatReader
 from stream_director.config import Settings
 from stream_director.db import ChatUserDB
 from stream_director.director import Director
@@ -104,6 +105,17 @@ async def test_settings_put_persists(client, ctx):
 
     r = await client.put("/api/settings", json={"llm_provider": "wat"})
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_settings_put_switches_chat_channel(client, ctx):
+    async def noop(user, text):
+        pass
+
+    ctx.chat = TwitchChatReader("oldchan", noop)
+    r = await client.put("/api/settings", json={"twitch_channel": "#NewChan"})
+    assert r.status_code == 200
+    assert ctx.chat.channel == "newchan"
 
 
 @pytest.mark.asyncio

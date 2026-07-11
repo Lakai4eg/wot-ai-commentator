@@ -182,7 +182,7 @@ export function Panel() {
           </>
         )}
         <label>
-          Канал Twitch (перезапуск приложения для применения)
+          Канал Twitch (применяется сразу после сохранения)
           <input
             value={settings.twitch_channel}
             onChange={(e) => setSettings({ ...settings, twitch_channel: e.target.value })}
