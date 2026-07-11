@@ -36,7 +36,10 @@ _TEAM_GAP_TEAM_KILLS = 5       # …при этом команда уже нав
 _TEAM_GAP_BEHIND_DIFF = 10     # команда отстаёт по киллам
 
 _MULTIKILL_LABELS = {2: "дабл-килл", 3: "трипл-килл", 4: "квадра-килл", 5: "пентакилл"}
-_OBJECTIVE_KINDS = {"DragonKill": "дракон", "HeraldKill": "герольд", "BaronKill": "барон"}
+# вид объекта: (русская строка для LLM, машинный ключ для шаблонов)
+_OBJECTIVE_KINDS = {"DragonKill": ("дракон", "dragon"),
+                    "HeraldKill": ("герольд", "herald"),
+                    "BaronKill": ("барон", "baron")}
 
 
 class LolMapper:
@@ -162,6 +165,21 @@ class LolMapper:
                 return "ours" if my_team and p.get("team") == my_team else "theirs"
         return "unknown"
 
+    @staticmethod
+    def _turret_side(turret_name: Any, me: dict | None) -> str:
+        """ours — пала вражеская башня, theirs — наша.
+
+        Сторону определяем по ИМЕНИ башни (Turret_T1_… принадлежит ORDER,
+        Turret_T2_… — CHAOS), а не по убийце: последний удар часто за
+        миньоном, которого _side_of не сопоставит с игроками.
+        """
+        my_team = (me or {}).get("team")
+        name = str(turret_name or "")
+        owner = "ORDER" if "_T1_" in name else "CHAOS" if "_T2_" in name else None
+        if not my_team or owner is None:
+            return "unknown"
+        return "theirs" if owner == my_team else "ours"
+
     def _emit(self, type_: str, payload: dict,
               priority: Priority = Priority.NORMAL, ttl_s: float = 20.0) -> None:
         stim = Stimulus(kind="game_event", type=type_, game="lol",
@@ -175,7 +193,7 @@ class LolMapper:
 
     def _emit_battle_start(self, data: dict, me: dict | None, *, silent: bool = True) -> None:
         # silent=True — тихий старт (подключение посреди матча): только память.
-        # silent=False — настоящий GameStart: звучит интро (прибытие Годжо на Рифт).
+        # silent=False — настоящий GameStart: звучит интро.
         if self._started:
             return
         self._started = True
@@ -284,19 +302,24 @@ class LolMapper:
                 Priority.HIGH, ttl_s=15,
             )
         elif name in _OBJECTIVE_KINDS:
-            kind = _OBJECTIVE_KINDS[name]
+            kind, kind_key = _OBJECTIVE_KINDS[name]
             if name == "DragonKill" and ev.get("DragonType"):
                 kind = f"дракон ({ev['DragonType']})"
             stolen = str(ev.get("Stolen", "False")) == "True"
             self._emit(
                 "objective",
-                {"kind": kind, "side": self._side_of(ev.get("KillerName"), me, players),
+                {"kind": kind, "kind_key": kind_key,
+                 "side": self._side_of(ev.get("KillerName"), me, players),
                  "stolen": stolen},
                 Priority.HIGH if stolen else Priority.NORMAL, ttl_s=15,
             )
         elif name == "TurretKilled":
             if self._is_me(ev.get("KillerName"), me):
                 self._emit("turret", {}, Priority.NORMAL, ttl_s=15)
+            else:
+                side = self._turret_side(ev.get("TurretKilled"), me)
+                if side in ("ours", "theirs"):
+                    self._emit("turret", {"side": side}, Priority.NORMAL, ttl_s=15)
         elif name == "InhibKilled":
             if self._is_me(ev.get("KillerName"), me):
                 self._emit("inhib", {}, Priority.NORMAL, ttl_s=15)

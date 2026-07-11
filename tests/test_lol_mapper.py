@@ -84,7 +84,7 @@ def test_fresh_game_emits_speaking_battle_start():
     ))
     assert [s.type for s in stims] == ["battle_start"]
     s = stims[0]
-    # Настоящий GameStart звучит (интро про прибытие Годжо на Рифт), не тихий.
+    # Настоящий GameStart звучит (интро), не тихий.
     assert s.game == "lol" and s.payload["silent"] is False
     assert s.payload["champion"] == "Garen"
 
@@ -153,6 +153,8 @@ def test_objectives_sides_and_steal():
     dragon = [s for s in stims if s.type == "objective"][0]
     baron = [s for s in stims if s.type == "objective"][1]
     assert dragon.payload["side"] == "ours" and "дракон" in dragon.payload["kind"]
+    assert dragon.payload["kind_key"] == "dragon"
+    assert baron.payload["kind_key"] == "baron"
     assert baron.payload["side"] == "theirs" and baron.payload["stolen"] is True
     assert baron.priority == Priority.HIGH
     assert by_type["turret"].type == "turret"
@@ -547,6 +549,40 @@ def test_first_blood_without_matching_kill_has_no_victim():
     ], game_time=5.0))
     p = [s for s in stims if s.type == "first_blood"][0].payload
     assert p["victim"] is None and p["victim_me"] is False
+
+
+def test_turret_sides_by_turret_name():
+    # Сторона башни — по имени снесённой башни (T1=ORDER, T2=CHAOS), а не по
+    # убийце: башни часто добивают миньоны, которых _side_of не сопоставит.
+    m, stims = make()
+    events = [
+        {"EventID": 0, "EventName": "GameStart"},
+        # Союзник снёс вражескую башню (T2 = CHAOS, стример в ORDER) — «забрали».
+        {"EventID": 1, "EventName": "TurretKilled", "KillerName": ALLY,
+         "TurretKilled": "Turret_T2_L_03_A"},
+        # Миньоны снесли нашу башню (T1 = ORDER) — «отдали», убийца не сопоставим.
+        {"EventID": 2, "EventName": "TurretKilled",
+         "KillerName": "Minion_T200_L1_S25", "TurretKilled": "Turret_T1_C_05_A"},
+        # Стример добил лично — прежнее личное событие без стороны.
+        {"EventID": 3, "EventName": "TurretKilled", "KillerName": ME,
+         "TurretKilled": "Turret_T2_C_01_A"},
+    ]
+    m.handle_payload(payload(events=events, game_time=10.0))
+    turrets = [s for s in stims if s.type == "turret"]
+    assert [t.payload.get("side") for t in turrets] == ["ours", "theirs", None]
+
+
+def test_turret_with_unknown_team_not_emitted():
+    # Команду башни из имени не распознали, добил не стример — молчим,
+    # сторону не выдумываем (прецедент ложных комментариев про дракона).
+    m, stims = make()
+    events = [
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "TurretKilled",
+         "KillerName": "SomeoneElse#XX1", "TurretKilled": "Obelisk_Weird"},
+    ]
+    m.handle_payload(payload(events=events, game_time=10.0))
+    assert [s for s in stims if s.type == "turret"] == []
 
 
 def test_assist_carries_ally_killer():

@@ -22,9 +22,7 @@ _FLAVOR = (
 _EVENT_DESCRIPTIONS = {
     "battle_start": (
         "Матч на Ущелье призывателей только начался — стример выходит за {champion_ru}. "
-        "Обыграй это как прибытие Годжо Сатору из «Магической битвы»: на Summoner's Rift "
-        "явился сильнейший. Можно подмигнуть его фишкам (снятая повязка и Шесть Глаз, "
-        "Бесконечность, вежливое «прошу прощения») — по-доброму, коротко, без перебора."
+        "Поприветствуй зрителей и задай тон стриму — коротко, с иронией."
     ),
     "frag": "Стример убил вражеского чемпиона {target}.",
     "death": "Стримера убил {killer}.",
@@ -36,6 +34,11 @@ _EVENT_DESCRIPTIONS = {
     "first_blood": "Первая кровь матча: {note}.",
     "objective": "{side_ru}: {kind}.{stolen_note}",
     "turret": "Стример добил вражескую башню.",
+    "turret_ours": (
+        "Команда стримера снесла башню противника — добил союзник или миньоны, "
+        "лично стример её не добивал."
+    ),
+    "turret_theirs": "Противник снёс башню команды стримера.",
     "inhib": "Стример снёс ингибитор противника.",
     "ace": "{ace_ru}",
     "battle_result": "Игра окончена: {outcome_ru}.",
@@ -70,7 +73,15 @@ def variant_key(stimulus: Stimulus) -> str:
     if t == "team_gap":
         return f"team_gap_{p.get('kind', 'behind')}"
     if t == "objective" and p.get("side") in ("ours", "theirs"):
-        return f"objective_{p['side']}"
+        side = p["side"]
+        if p.get("stolen"):
+            return f"objective_stolen_{side}"  # крад важнее вида объекта
+        kind_key = p.get("kind_key")
+        if kind_key in ("dragon", "baron", "herald"):
+            return f"objective_{kind_key}_{side}"
+        return f"objective_{side}"  # старый payload: пул откатится на objective
+    if t == "turret" and p.get("side") in ("ours", "theirs"):
+        return f"turret_{p['side']}"
     if t == "ace":
         return "ace_theirs" if p.get("side") == "theirs" else "ace_ours"
     return t

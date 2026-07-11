@@ -47,16 +47,6 @@ def test_flavor_mentions_lol():
     assert "League of Legends" in flavor_lines()
 
 
-def test_battle_start_carries_gojo_bit():
-    # Интро на старте матча — про прибытие Годжо на Ущелье призывателей.
-    desc = describe_event(game("battle_start", champion="Yasuo"))
-    assert "Годжо" in desc and "Yasuo" in desc
-    # И фолбэк (когда LLM мертва) тоже держит эту шутку — любой из мотивов Годжо.
-    motifs = ("годжо", "сильнейш", "силён", "бессмертн")
-    line = lol_module().fallback_line(Stimulus(kind="game_event", type="battle_start"))
-    assert any(w in line.lower() for w in motifs)
-
-
 def test_build_module_contract():
     m = build_module(Settings(), submit=lambda s: None)
     assert m.id == "lol"
@@ -95,8 +85,10 @@ def test_fallback_covers_new_ally_types():
 
 def test_fallback_objective_sides_differ():
     m = lol_module()
-    ours = {m.fallback_line(game("objective", side="ours")) for _ in range(30)}
-    theirs = {m.fallback_line(game("objective", side="theirs")) for _ in range(30)}
+    ours = {m.fallback_line(game("objective", kind_key="dragon", side="ours"))
+            for _ in range(30)}
+    theirs = {m.fallback_line(game("objective", kind_key="dragon", side="theirs"))
+              for _ in range(30)}
     assert ours and theirs and ours.isdisjoint(theirs)
 
 
@@ -113,17 +105,21 @@ def test_flavor_mentions_ally_targets():
 
 def test_templates_are_rich_and_unique():
     templates = lol_module().template_pool.templates
-    rich = ("frag", "death", "multikill", "first_blood",
-            "turret", "inhib", "ace_ours", "objective_ours", "objective_theirs")
-    for key in rich:
-        assert len(templates[key]) >= 8, key
-    # battle_start/assist/ace_theirs короче остальных — держим планку в 5.
-    new = ("battle_start", "assist", "ace_theirs", "ally_feeding",
-           "ally_carrying_multikill", "ally_carrying_lead",
-           "team_gap_spectator", "team_gap_behind")
-    for key in new:
-        assert len(templates[key]) >= 5, key
+    # Спека 2026-07-11: события объектов и башен разделены по видам и сторонам.
+    split_keys = (
+        "objective_dragon_ours", "objective_dragon_theirs",
+        "objective_baron_ours", "objective_baron_theirs",
+        "objective_herald_ours", "objective_herald_theirs",
+        "objective_stolen_ours", "objective_stolen_theirs",
+        "turret_ours", "turret_theirs",
+    )
+    for key in split_keys:
+        assert key in templates, key
+    # Старые обобщённые файлы удалены — их фразы переехали в новые.
+    assert "objective_ours" not in templates
+    assert "objective_theirs" not in templates
     for key, options in templates.items():
+        assert len(options) >= 20, f"{key}: {len(options)} < 20"
         assert len(set(options)) == len(options), f"дубликаты в {key}"
 
 
@@ -173,3 +169,32 @@ def test_assist_description_names_ally_killer():
 def test_flavor_forbids_kill_misattribution():
     text = flavor_lines()
     assert "кто убил" in text.lower() or "не путай" in text.lower()
+
+
+def test_variant_key_objective_kinds_steals_and_turrets():
+    from stream_director.games.lol.flavor import variant_key
+    assert variant_key(game("objective", kind_key="dragon", side="ours")) == "objective_dragon_ours"
+    assert variant_key(game("objective", kind_key="baron", side="theirs")) == "objective_baron_theirs"
+    assert variant_key(game("objective", kind_key="herald", side="theirs")) == "objective_herald_theirs"
+    # Крад важнее вида объекта.
+    assert variant_key(game("objective", kind_key="baron", side="ours", stolen=True)) == "objective_stolen_ours"
+    assert variant_key(game("objective", kind_key="dragon", side="theirs", stolen=True)) == "objective_stolen_theirs"
+    # Сторона неизвестна — честный фолбэк, кто бы ни забрал.
+    assert variant_key(game("objective", kind_key="dragon", side="unknown")) == "objective"
+    # Старый payload без kind_key: пул откатится на файл objective сам.
+    assert variant_key(game("objective", side="ours")) == "objective_ours"
+    assert variant_key(game("turret", side="ours")) == "turret_ours"
+    assert variant_key(game("turret", side="theirs")) == "turret_theirs"
+    assert variant_key(game("turret")) == "turret"
+
+
+def test_turret_side_descriptions():
+    ours = describe_event(game("turret", side="ours"))
+    theirs = describe_event(game("turret", side="theirs"))
+    personal = describe_event(game("turret"))
+    # Команда взяла башню — заслуга не лично стримера.
+    assert "команда" in ours.lower() and "не" in ours.lower()
+    # Нашу башню снесли.
+    assert "противник" in theirs.lower()
+    # Личное событие — прежний текст про стримера.
+    assert "стример" in personal.lower()
