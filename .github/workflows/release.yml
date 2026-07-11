@@ -9,6 +9,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      # Консоль раннера — cp1252: без UTF-8-режима питона падают русские print'ы
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
