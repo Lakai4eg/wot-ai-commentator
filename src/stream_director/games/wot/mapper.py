@@ -104,6 +104,16 @@ class WotMapper:
         return "SPG" in marker and "AT-SPG" not in marker
 
     @staticmethod
+    def _is_light(vehicle: Any) -> bool:
+        """Текущий танк — ЛТ: класс lightTank/LT в class/classTag/type/tag."""
+        if not isinstance(vehicle, dict):
+            return False
+        markers = [
+            str(vehicle.get(k) or "") for k in ("class", "classTag", "type", "tag")
+        ]
+        return any(m == "LT" or "lighttank" in m.lower() for m in markers)
+
+    @staticmethod
     def _vehicle_name(vehicle: Any) -> str:
         if not isinstance(vehicle, dict):
             return "неизвестный"
@@ -225,6 +235,10 @@ class WotMapper:
         elif ftype == "crit":
             self._emit("crit", {"detail": data.get("critsCount")}, Priority.LOW, ttl_s=10)
         elif ftype == "spotted":
+            # Реплика про засвет уместна только на ЛТ — светить его работа;
+            # на остальных классах (или без данных о танке) молчим.
+            if not self._is_light(self.client.get("hangar.vehicle.info")):
+                return
             # Засвет частит — реплику даём не чаще раза в _SPOTTED_DEDUP_S.
             now = time.time()
             if now - self._last_spotted_at < _SPOTTED_DEDUP_S:

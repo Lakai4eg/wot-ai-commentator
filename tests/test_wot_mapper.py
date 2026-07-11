@@ -207,8 +207,16 @@ def test_crit(wired):
     assert s.priority == Priority.LOW
 
 
-def test_spotted(wired):
+def light_tank(name="ELC EVEN 90"):
+    tank = veh(name)
+    tank["class"] = "lightTank"
+    return tank
+
+
+def test_spotted_on_light_tank(wired):
+    """Засвет комментируем только на ЛТ — светить его работа."""
     client, _, emitted = wired
+    client.state["hangar.vehicle.info"] = light_tank()
     client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
     s = only(emitted)
     assert s.type == "spotted"
@@ -218,10 +226,28 @@ def test_spotted(wired):
 def test_spotted_dedup(wired):
     """Засвет частит — второй в пределах окна дедупа не даёт новой реплики."""
     client, _, emitted = wired
+    client.state["hangar.vehicle.info"] = light_tank()
     client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
     client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
     s = only(emitted)
     assert s.type == "spotted"
+
+
+def test_spotted_ignored_on_non_light_tank(wired):
+    """На тяже засвет — не наша заслуга, реплики нет."""
+    client, _, emitted = wired
+    tank = veh("E 100")
+    tank["class"] = "heavyTank"
+    client.state["hangar.vehicle.info"] = tank
+    client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
+    assert emitted == []
+
+
+def test_spotted_ignored_without_vehicle_info(wired):
+    """Класс танка неизвестен — молчим (только ЛТ даёт реплику про засвет)."""
+    client, _, emitted = wired
+    client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {"isVisible": True}})
+    assert emitted == []
 
 
 def test_assist_growth_threshold(wired):
@@ -416,6 +442,7 @@ def test_tier10_tank_no_joke(wired):
 
 def test_diag_tracks_events(wired):
     client, mapper, emitted = wired
+    client.state["hangar.vehicle.info"] = light_tank()
     client.fire("battle.onPlayerFeedback", {"type": "spotted", "data": {}})
     d = mapper.diag
     assert d["game_state"] == "battle"
