@@ -65,3 +65,13 @@ def test_voice_fields_roundtrip(tmp_path):
     )
     save_settings(s, path)
     assert load_settings(path) == s
+
+
+def test_template_mode_default_and_validation(tmp_path):
+    assert Settings().template_mode == "seed"
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"template_mode": "чепуха"}), encoding="utf-8")
+    # Неизвестное значение из старого/битого файла — тихий откат на дефолт.
+    assert load_settings(path).template_mode == "seed"
+    path.write_text(json.dumps({"template_mode": "verbatim"}), encoding="utf-8")
+    assert load_settings(path).template_mode == "verbatim"

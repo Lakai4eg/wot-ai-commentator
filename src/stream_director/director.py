@@ -125,16 +125,29 @@ class Director:
         memory_lines = facts + module.memory.battle_lines()
         want_session = random.random() < self.SESSION_TEASE_PROB
         session_lines = module.memory.session_lines() if want_session else []
-        prompt = build_prompt(module, stimulus, memory_lines, session_lines,
-                              recent_lines=list(self._recent_replicas))
-        text = await self.backend.generate(prompt)
 
+        # Шаблоны-заготовки: дословно в эфир (verbatim), затравкой в промпт
+        # (seed) или только как фолбэк (off). Чат-заказы шаблоны не трогают.
+        pool = module.template_pool if stimulus.kind == "game_event" else None
+        mode = self.settings.template_mode
+        seed: str | None = None
+        text: str | None = None
+        if pool is not None and mode == "verbatim":
+            text = pool.take(stimulus)
         if text is None:
-            if stimulus.kind == "chat_order" and stimulus.type == "dir":
-                return True  # свободный заказ шаблоном не подменяем
-            text = module.fallback_line(stimulus)
+            if pool is not None and mode == "seed":
+                seed = pool.take(stimulus)
+            prompt = build_prompt(module, stimulus, memory_lines, session_lines,
+                                  recent_lines=list(self._recent_replicas),
+                                  seed_line=seed)
+            text = await self.backend.generate(prompt)
             if text is None:
-                return True
+                if stimulus.kind == "chat_order" and stimulus.type == "dir":
+                    return True  # свободный заказ шаблоном не подменяем
+                # Затравка уже выбрана — её и говорим, второй шаблон не тратим.
+                text = seed if seed is not None else module.fallback_line(stimulus)
+                if text is None:
+                    return True
 
         # Реплика могла «протухнуть», пока генерировалась.
         if stimulus.expired():

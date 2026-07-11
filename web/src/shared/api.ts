@@ -26,6 +26,7 @@ export interface SettingsDto {
   default_voice: string;
   voice_by_priority: Record<string, string>;
   voice_overrides: Record<string, string>;
+  template_mode: "seed" | "verbatim" | "off";
 }
 
 export interface StatusDto {

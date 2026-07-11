@@ -87,3 +87,17 @@ def test_no_joke_angle_without_field():
     # WoT-модуль поле не задаёт — строки угла быть не должно.
     p = build_prompt(MODULE, game("frag"), [])
     assert "Угол шутки" not in p
+
+
+def test_seed_line_block_present_and_replaces_angle():
+    # Затравка сама задаёт угол — случайный «угол шутки» не подсказываем,
+    # иначе LLM получает две конфликтующие инструкции.
+    module = dataclasses.replace(MODULE, joke_angles=lambda: ("угол-тест",))
+    p = build_prompt(module, game("frag"), [], seed_line="Минус один!")
+    assert "Заготовка шутки: «Минус один!»" in p
+    assert "Угол шутки" not in p
+
+
+def test_no_seed_block_by_default():
+    p = build_prompt(MODULE, game("frag"), [])
+    assert "Заготовка шутки" not in p

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from ..stimulus import Stimulus
+from .template_pool import TemplatePool
 
 
 class GameSource(Protocol):
@@ -47,6 +48,8 @@ class GameModule:
     diag: Callable[[], dict]  # диагностика маппера для /api/status
     # Подсказки «угла шутки» для промпта; None — модуль ротацию не использует.
     joke_angles: Callable[[], tuple[str, ...]] | None = None
+    # Пул шаблонов-заготовок (см. director: seed/verbatim); None — не использует.
+    template_pool: TemplatePool | None = None
 
 
 class ActiveGameTracker:

@@ -51,6 +51,9 @@ class Settings:
     default_voice: str = "baya"
     voice_by_priority: dict[str, str] = field(default_factory=dict)
     voice_overrides: dict[str, str] = field(default_factory=dict)
+    # Шаблоны-заготовки LoL: "seed" — затравка для LLM, "verbatim" — сначала
+    # дословно, "off" — только фолбэк при мёртвой LLM.
+    template_mode: str = "seed"
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -62,10 +65,14 @@ def load_settings(path: str | Path) -> Settings:
     known = {f.name for f in dataclasses.fields(Settings)}
     data = {k: v for k, v in raw.items() if k in known}
     try:
-        return Settings(**data)
+        settings = Settings(**data)
     except TypeError:
         log.warning("settings.json contains invalid values, using defaults")
         return Settings()
+    if settings.template_mode not in ("seed", "verbatim", "off"):
+        log.warning("неизвестный template_mode %r — беру 'seed'", settings.template_mode)
+        settings.template_mode = "seed"
+    return settings
 
 
 def save_settings(settings: Settings, path: str | Path) -> None:

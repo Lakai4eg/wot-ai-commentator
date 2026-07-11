@@ -302,3 +302,134 @@ async def test_recent_replicas_fed_back_into_prompt():
     assert "не повторяй их" in backend.prompts[1].lower()
     # В первый промпт истории ещё нет.
     assert "не повторяй их" not in backend.prompts[0].lower()
+
+
+def lol_game(type_="frag", **payload):
+    payload.setdefault("target", "Darius")
+    return Stimulus(kind="game_event", type=type_, game="lol",
+                    priority=Priority.HIGH, payload=payload)
+
+
+class NoneBackend(FakeBackend):
+    async def generate(self, prompt):
+        self.prompts.append(prompt)
+        return None
+
+
+def exhaust(pool, stimulus):
+    while pool.take(stimulus) is not None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_verbatim_mode_speaks_template_without_llm():
+    backend = FakeBackend()
+    d, published = make_director(backend=backend, template_mode="verbatim")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.submit(lol_game())
+    await drain(d)
+    assert len(published) == 1
+    assert backend.prompts == []  # LLM не трогали
+    assert published[0][0] in lol.template_pool.templates["frag"]
+
+
+@pytest.mark.asyncio
+async def test_verbatim_mode_falls_to_llm_when_exhausted():
+    backend = FakeBackend(reply="сгенерировано")
+    d, published = make_director(backend=backend, template_mode="verbatim")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    exhaust(lol.template_pool, lol_game())
+    d.submit(lol_game())
+    await drain(d)
+    assert published[0][0] == "сгенерировано"
+    assert "Заготовка шутки" not in backend.prompts[-1]  # затравки нет — пул пуст
+
+
+@pytest.mark.asyncio
+async def test_seed_mode_puts_template_into_prompt():
+    backend = FakeBackend()
+    d, published = make_director(backend=backend, template_mode="seed")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.submit(lol_game())
+    await drain(d)
+    assert len(published) == 1
+    prompt = backend.prompts[-1]
+    assert "Заготовка шутки:" in prompt
+    assert "Угол шутки" not in prompt  # затравка вытесняет случайный угол
+
+
+@pytest.mark.asyncio
+async def test_seed_mode_dead_llm_speaks_seed_verbatim():
+    backend = NoneBackend()
+    d, published = make_director(backend=backend, template_mode="seed")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.submit(lol_game())
+    await drain(d)
+    assert len(published) == 1
+    # В эфир ушла сама затравка (она же была в промпте), второй шаблон не тратим.
+    assert published[0][0] in backend.prompts[-1]
+    assert published[0][0] in lol.template_pool.templates["frag"]
+
+
+@pytest.mark.asyncio
+async def test_off_mode_no_seed_but_fallback_consumes_pool():
+    backend = NoneBackend()
+    d, published = make_director(backend=backend, template_mode="off")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.submit(lol_game())
+    await drain(d)
+    assert "Заготовка шутки" not in backend.prompts[-1]
+    first = published[0][0]
+    assert first in lol.template_pool.templates["frag"]
+    # Фолбэк расходует общий пул: та же реплика не прозвучит второй раз.
+    d.submit(lol_game())
+    await drain(d)
+    assert published[1][0] != first
+
+
+@pytest.mark.asyncio
+async def test_templates_shared_pool_across_modes():
+    # Один пул на сессию: сказанное в verbatim не станет затравкой в seed.
+    backend = FakeBackend()
+    d, published = make_director(backend=backend, template_mode="verbatim")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.submit(lol_game())
+    await drain(d)
+    spoken = published[0][0]
+    d.settings.template_mode = "seed"  # горячая смена режима
+    d.submit(lol_game())
+    await drain(d)
+    # Сказанное в verbatim не переиспользуется как затравка (общий пул).
+    # Проверяем именно блок затравки: в «последних репликах» spoken осядет
+    # честно (антиповтор), но это другой механизм — к пулу отношения не имеет.
+    assert f"Заготовка шутки: «{spoken}»" not in backend.prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_wot_module_without_pool_unaffected():
+    # У WoT пула нет — verbatim не меняет его поведение.
+    backend = FakeBackend()
+    d, published = make_director(backend=backend, template_mode="verbatim")
+    d.submit(game("frag"))
+    await drain(d)
+    assert published[0][0] == "реплика"  # обычная генерация
+
+
+@pytest.mark.asyncio
+async def test_chat_order_ignores_templates():
+    backend = FakeBackend()
+    d, published = make_director(backend=backend, template_mode="verbatim")
+    lol = build_lol(Settings(), submit=lambda s: None)
+    d.register(lol)
+    d.tracker.mark_live("lol")
+    d.submit(Stimulus(kind="chat_order", type="dir",
+                      payload={"text": "скажи привет", "username": "u"}))
+    await drain(d)
+    assert len(published) == 1
+    assert published[0][0] == "реплика"  # ответ LLM, не шаблон

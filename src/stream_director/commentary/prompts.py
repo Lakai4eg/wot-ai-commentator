@@ -51,6 +51,7 @@ def build_prompt(
     memory_lines: list[str],
     session_lines: list[str] | None = None,
     recent_lines: list[str] | None = None,
+    seed_line: str | None = None,
 ) -> str:
     parts = [_PERSONA_CORE, module.flavor_lines(), ""]
 
@@ -87,8 +88,15 @@ def build_prompt(
 
     parts.append("")
     parts.append(f"Обращение к стримеру на этот раз: {random.choice(_ADDRESS_STYLES)}.")
-    angles = module.joke_angles() if module.joke_angles else ()
-    if angles:
-        parts.append(f"Угол шутки на этот раз: {random.choice(angles)}.")
+    if seed_line:
+        # Затравка задаёт угол сама — случайный угол не подсказываем.
+        parts.append(
+            f"Заготовка шутки: «{seed_line}». Разверни её в свою реплику: "
+            "сохрани соль, адаптируй под текущий контекст боя, можешь перефразировать."
+        )
+    else:
+        angles = module.joke_angles() if module.joke_angles else ()
+        if angles:
+            parts.append(f"Угол шутки на этот раз: {random.choice(angles)}.")
     parts.append(_RULES)
     return "\n".join(parts)

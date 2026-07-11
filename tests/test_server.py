@@ -108,6 +108,16 @@ async def test_settings_put_persists(client, ctx):
 
 
 @pytest.mark.asyncio
+async def test_settings_template_mode_roundtrip_and_validation(client, ctx):
+    r = await client.put("/api/settings", json={"template_mode": "verbatim"})
+    assert r.status_code == 200
+    assert r.json()["template_mode"] == "verbatim"
+    assert ctx.settings.template_mode == "verbatim"
+    r = await client.put("/api/settings", json={"template_mode": "чепуха"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_settings_put_switches_chat_channel(client, ctx):
     async def noop(user, text):
         pass

@@ -69,6 +69,7 @@ class SettingsIn(BaseModel):
     default_voice: str | None = None
     voice_by_priority: dict[str, str] | None = None
     voice_overrides: dict[str, str] | None = None
+    template_mode: str | None = None
 
 
 class PreviewIn(BaseModel):
@@ -96,6 +97,8 @@ def create_app(ctx: AppContext) -> FastAPI:
         data = patch.model_dump(exclude_none=True)
         if "llm_provider" in data and data["llm_provider"] not in ("gemini", "openai"):
             raise HTTPException(400, "llm_provider must be 'gemini' or 'openai'")
+        if "template_mode" in data and data["template_mode"] not in ("seed", "verbatim", "off"):
+            raise HTTPException(400, "template_mode must be 'seed', 'verbatim' or 'off'")
         # Маска из GET («••••••••») — не настоящий ключ: молча игнорируем,
         # чтобы случайный PUT маски не затёр сохранённый ключ.
         for key in ("gemini_api_key", "openai_api_key"):

@@ -227,6 +227,19 @@ export function Panel() {
             Команды всем (кроме забаненных)
           </label>
         </div>
+        <label className="check">
+          Шаблоны реплик (LoL)
+          <select
+            value={settings.template_mode}
+            onChange={(e) =>
+              patch({ template_mode: e.target.value as SettingsDto["template_mode"] })
+            }
+          >
+            <option value="seed">затравка для LLM (уникальные реплики)</option>
+            <option value="verbatim">сначала дословно, потом LLM</option>
+            <option value="off">только при сбое LLM</option>
+          </select>
+        </label>
         <label>
           Не озвучивать реплики старше, секунд (текст всё равно покажем)
           <input
