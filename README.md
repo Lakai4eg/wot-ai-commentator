@@ -6,37 +6,28 @@ AI-режиссёр стрима для «Мира танков» и League of L
 реагирует ехидными репликами (плашки в OBS + голос Silero) и исполняет
 команды доверенных зрителей из чата Twitch.
 
-## Первый запуск (с Gemini)
+## Установка (Windows)
 
-1. **Python 3.12+ и Node.js 18+**: скачай с [python.org](https://www.python.org/downloads/)
-   (галочка «Add python.exe to PATH» в установщике) и [nodejs.org](https://nodejs.org/),
-   либо через winget:
-   ```bash
-   winget install Python.Python.3.12 OpenJS.NodeJS.LTS
-   ```
-   Проверка: `python --version` и `node --version` в новом окне терминала.
-2. **Мод** (только для WoT): скачай `wotstat.data-provider_<версия>.mtmod` из
+1. Скачай `StreamDirector-vX.Y.Z-win64.zip` из
+   [последнего релиза](https://github.com/Lakai4eg/wot-ai-commentator/releases/latest)
+   и распакуй в любую папку. Python и Node.js ставить не нужно — всё в комплекте,
+   включая голос.
+2. Запусти `StreamDirector.exe` — откроется консоль с логами, а панель сама
+   откроется в браузере. При первом запуске SmartScreen может предупредить о
+   неизвестном издателе: «Подробнее» → «Выполнить в любом случае».
+3. **Мод** (только для WoT): скачай `wotstat.data-provider_<версия>.mtmod` из
    [релизов](https://github.com/wotstat/wotstat-data-provider/releases) и положи в
    `<папка игры>/mods/<версия игры>/`. Перезапусти игру.
-3. **Зависимости**:
-   ```bash
-   python -m pip install -e .[dev,ml]      # ml = голос (torch + Silero)
-   cd web && npm install && npm run build && cd ..
-   ```
 4. **Ключ Gemini**: бесплатно в [Google AI Studio](https://aistudio.google.com/apikey)
    (из РФ нужен маршрут до `generativelanguage.googleapis.com` — VPN/pbr).
-5. **Запуск**:
-   ```bash
-   python -m stream_director
-   ```
-6. **Панель** http://127.0.0.1:8710/panel — вставь API-ключ Gemini (провайдер
-   «Gemini» выбран по умолчанию), укажи канал Twitch. После сохранения ключа
-   панель сама проверит LLM пробным запросом.
-7. **OBS**: добавь http://127.0.0.1:8710/overlay как Browser Source на весь холст.
+5. В панели вставь API-ключ Gemini (провайдер «Gemini» выбран по умолчанию),
+   укажи канал Twitch. После сохранения ключа панель сама проверит LLM пробным
+   запросом.
+6. **OBS**: добавь http://127.0.0.1:8710/overlay как Browser Source на весь холст.
 
 Готово: бейджи `чат`, `LLM` и `голос` в шапке панели зелёные, а `WoT`/`LoL`
 загорится, как только запустится игра (активная отмечена ●) — иди в бой,
-реплики пойдут сами.
+реплики пойдут сами. О новых версиях панель сообщит баннером со ссылкой.
 
 ![Панель управления](docs/panel.png)
 
@@ -65,6 +56,18 @@ Ollama Cloud (`https://ollama.com/v1`), локальный Ollama
 `banned`: она запрещает команды всегда.
 
 ## Разработка
+
+Установка из исходников (Mac/Linux или без готового билда):
+
+1. Python 3.12+ и Node.js 18+ (Windows: `winget install Python.Python.3.12 OpenJS.NodeJS.LTS`,
+   в установщике Python — галочка «Add python.exe to PATH»).
+2. `python -m pip install -e .[dev,ml]` (ml = голос: torch + Silero)
+   и `cd web && npm install && npm run build && cd ..`.
+3. Запуск: `python -m stream_director`, панель — http://127.0.0.1:8710/panel.
+
+Сборка portable-дистрибутива: `python scripts/build_portable.py`
+(Windows, нужен MSVC; `--skip-launcher` — без него). Релиз собирает CI
+на тег `v*` (`.github/workflows/release.yml`).
 
 ```bash
 python -m pytest            # тесты ядра

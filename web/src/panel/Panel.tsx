@@ -104,6 +104,14 @@ export function Panel() {
         </span>
       </h1>
       {message && <div className="message">{message}</div>}
+      {status.update_available && (
+        <div className="message">
+          Доступна версия {status.update_available.version} —{" "}
+          <a href={status.update_available.url} target="_blank" rel="noreferrer">
+            скачать на GitHub
+          </a>
+        </div>
+      )}
 
       <section>
         <h2>Подключения</h2>

@@ -50,6 +50,8 @@ export interface StatusDto {
     replicas_last_minute: number;
   };
   memory?: string[];
+  app_version?: string;
+  update_available?: { version: string; url: string };
 }
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {

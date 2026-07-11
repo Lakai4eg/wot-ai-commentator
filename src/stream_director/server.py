@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import __version__
 from .broadcast import OverlayBroadcaster
 from .commentary.switch import SwitchBackend
 from .config import Settings, save_settings
@@ -150,6 +151,7 @@ def create_app(ctx: AppContext) -> FastAPI:
         return {
             **ctx.statuses,
             "active_game": active,
+            "app_version": __version__,
             "overlay_clients": len(ctx.broadcaster.ws_clients),
             "director": ctx.director.stats(),
             "tts": bool(tts and tts.available),

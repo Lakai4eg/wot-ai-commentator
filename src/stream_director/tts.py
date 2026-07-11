@@ -8,6 +8,7 @@ import logging
 import threading
 import wave
 from collections import OrderedDict
+from pathlib import Path
 
 from .config import Settings
 from .stimulus import Priority
@@ -17,6 +18,14 @@ log = logging.getLogger(__name__)
 SAMPLE_RATE = 48000
 VOICES: tuple[str, ...] = ("aidar", "baya", "kseniya", "xenia", "eugene", "random")
 DEFAULT_VOICE = "baya"
+
+# Portable-сборка кладёт модель сюда (относительно CWD — его ставит лаунчер).
+LOCAL_MODEL_PATH = Path("models") / "silero_v4_ru.pt"
+
+
+def resolve_model_source(local_path: Path = LOCAL_MODEL_PATH) -> Path | None:
+    """Локальная модель (portable-сборка), если файл есть; иначе None → torch.hub."""
+    return local_path if local_path.is_file() else None
 
 
 def pick_voice(settings: Settings, stim_type: str, priority: Priority) -> str:
@@ -45,13 +54,22 @@ class SileroTTS:
         try:
             import torch  # noqa: PLC0415
 
-            model, _ = torch.hub.load(
-                repo_or_dir="snakers4/silero-models",
-                model="silero_tts",
-                language="ru",
-                speaker="v4_ru",
-                trust_repo=True,
-            )
+            local = resolve_model_source()
+            if local is not None:
+                # Офлайн-загрузка: silero-модель — это torch.package-архив.
+                from torch import package  # noqa: PLC0415
+
+                importer = package.PackageImporter(str(local))
+                model = importer.load_pickle("tts_models", "model")
+                log.info("Silero TTS: локальная модель %s", local)
+            else:
+                model, _ = torch.hub.load(
+                    repo_or_dir="snakers4/silero-models",
+                    model="silero_tts",
+                    language="ru",
+                    speaker="v4_ru",
+                    trust_repo=True,
+                )
             model.to(torch.device("cpu"))
             self._model = model
             self.available = True

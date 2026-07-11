@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import webbrowser
 from pathlib import Path
 from typing import Awaitable, Callable
 
 import uvicorn
 
+from . import __version__
 from .broadcast import OverlayBroadcaster
 from .chat.router import ChatRouter
 from .chat.twitch import TwitchChatReader
@@ -23,6 +26,7 @@ from .games.lol.module import build_module as build_lol_module
 from .games.wot.module import build_module as build_wot_module
 from .server import AppContext, create_app
 from .tts import SileroTTS
+from .update_check import apply_update_status
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +64,21 @@ async def supervised(name: str, run: Callable[[], Awaitable[None]],
         except Exception:
             log.exception("Задача «%s» упала — перезапуск через %.0f с", name, retry_s)
             await asyncio.sleep(retry_s)
+
+
+async def open_panel_when_ready(
+    server, url: str, opener: Callable[[str], object] | None = None
+) -> None:
+    """Открыть панель, когда сервер реально принимает соединения.
+
+    Лаунчер portable-сборки выставляет STREAM_DIRECTOR_OPEN_PANEL=1 — браузер
+    открывает не он, а мы: так на медленном первом старте пользователь не
+    увидит «connection refused».
+    """
+    open_url = opener or webbrowser.open
+    while not server.started:
+        await asyncio.sleep(0.2)
+    open_url(url)
 
 
 async def run() -> None:
@@ -152,7 +171,18 @@ async def run() -> None:
         asyncio.create_task(supervised("chat", chat.run)),
         asyncio.create_task(supervised("wot", wot.source.run)),
         asyncio.create_task(supervised("lol", lol.source.run)),
+        # Одноразовая проверка обновлений: без supervised — сама глушит ошибки.
+        asyncio.create_task(apply_update_status(ctx.statuses, __version__)),
     ]
+    # Portable-лаунчер просит открыть панель в браузере после старта сервера.
+    if os.environ.get("STREAM_DIRECTOR_OPEN_PANEL") == "1":
+        tasks.append(
+            asyncio.create_task(
+                open_panel_when_ready(
+                    server, f"http://127.0.0.1:{settings.server_port}/panel"
+                )
+            )
+        )
     try:
         await server.serve()
     finally:

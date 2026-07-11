@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # cl.exe в PATH — для компиляции лаунчера
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Тесты
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest
+
+      - name: Версия совпадает с тегом
+        shell: python
+        run: |
+          import os, re
+          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          init = open("src/stream_director/__init__.py", encoding="utf-8").read()
+          code = re.search(r'__version__ = "([^"]+)"', init).group(1)
+          toml = open("pyproject.toml", encoding="utf-8").read()
+          proj = re.search(r'^version = "([^"]+)"', toml, re.M).group(1)
+          assert tag == code == proj, f"тег {tag}, __version__ {code}, pyproject {proj}"
+
+      - name: Сборка portable
+        run: python scripts/build_portable.py
+
+      - name: Смоук-тест
+        run: |
+          $zip = Get-ChildItem build/StreamDirector-*.zip
+          Expand-Archive $zip.FullName -DestinationPath smoke
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          python scripts/smoke_test.py smoke/StreamDirector $version
+
+      - name: Релиз
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/StreamDirector-*.zip
+          generate_release_notes: true

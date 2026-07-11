@@ -68,3 +68,39 @@ async def test_supervised_returns_on_clean_exit():
 
     await asyncio.wait_for(supervised("clean", clean), timeout=1.0)
     assert calls == [1]  # штатное завершение не перезапускается
+
+
+class _FakeServer:
+    def __init__(self):
+        self.started = False
+
+
+@pytest.mark.asyncio
+async def test_open_panel_waits_for_server_start():
+    from stream_director.main import open_panel_when_ready
+
+    server = _FakeServer()
+    opened: list[str] = []
+    task = asyncio.create_task(
+        open_panel_when_ready(server, "http://x/panel", opener=opened.append)
+    )
+    await asyncio.sleep(0.05)
+    assert opened == []  # сервер ещё не поднялся — браузер не трогаем
+
+    server.started = True
+    await asyncio.wait_for(task, timeout=2.0)
+    assert opened == ["http://x/panel"]
+
+
+@pytest.mark.asyncio
+async def test_open_panel_opens_immediately_if_started():
+    from stream_director.main import open_panel_when_ready
+
+    server = _FakeServer()
+    server.started = True
+    opened: list[str] = []
+    await asyncio.wait_for(
+        open_panel_when_ready(server, "http://x/panel", opener=opened.append),
+        timeout=2.0,
+    )
+    assert opened == ["http://x/panel"]

@@ -316,3 +316,12 @@ async def test_preview_returns_wav(client, ctx):
     assert r.status_code == 200
     assert r.content == b"RIFFfake"
     assert r.headers["content-type"] == "audio/wav"
+
+
+@pytest.mark.asyncio
+async def test_status_reports_app_version(client):
+    from stream_director import __version__
+
+    r = await client.get("/api/status")
+    assert r.status_code == 200
+    assert r.json()["app_version"] == __version__

@@ -61,3 +61,17 @@ def test_ctor_clamps_unknown_default_voice():
     from stream_director.tts import VOICES
     voice = "weird"
     assert (voice if voice in VOICES else "baya") == "baya"
+
+
+def test_resolve_model_source_local_file(tmp_path):
+    from stream_director.tts import resolve_model_source
+
+    model = tmp_path / "silero_v4_ru.pt"
+    model.write_bytes(b"fake")
+    assert resolve_model_source(model) == model
+
+
+def test_resolve_model_source_missing_file(tmp_path):
+    from stream_director.tts import resolve_model_source
+
+    assert resolve_model_source(tmp_path / "nope.pt") is None
