@@ -503,3 +503,59 @@ def test_team_gap_behind_once():
     m._last_ally_event_at = 0.0
     m.handle_payload(team_payload(ally=(1, 0), me_scores=(1, 0, 0), enemy=(15, 0)))
     assert len([s for s in stims if s.type == "team_gap"]) == 1
+
+
+def test_first_blood_carries_killer_victim_and_side():
+    """Первая кровь несёт сторону и жертву: ЛЛМ не должна хоронить стримера,
+    когда противник убил союзника."""
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "ChampionKill", "KillerName": ENEMY,
+         "VictimName": ALLY, "Assisters": []},
+        {"EventID": 2, "EventName": "FirstBlood", "Recipient": ENEMY},
+    ], game_time=5.0))
+    fb = [s for s in stims if s.type == "first_blood"]
+    assert len(fb) == 1
+    p = fb[0].payload
+    assert p["by_me"] is False
+    assert p["side"] == "theirs"
+    assert p["actor"] == "Darius"
+    assert p["victim"] == "Lux"
+    assert p["victim_me"] is False
+
+
+def test_first_blood_by_me_names_victim():
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "ChampionKill", "KillerName": ME,
+         "VictimName": ENEMY, "Assisters": []},
+        {"EventID": 2, "EventName": "FirstBlood", "Recipient": ME},
+    ], game_time=5.0))
+    p = [s for s in stims if s.type == "first_blood"][0].payload
+    assert p["by_me"] is True and p["side"] == "ours"
+    assert p["victim"] == "Darius" and p["victim_me"] is False
+
+
+def test_first_blood_without_matching_kill_has_no_victim():
+    # Recipient не совпал с последним киллом — жертву не выдумываем.
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "FirstBlood", "Recipient": ENEMY},
+    ], game_time=5.0))
+    p = [s for s in stims if s.type == "first_blood"][0].payload
+    assert p["victim"] is None and p["victim_me"] is False
+
+
+def test_assist_carries_ally_killer():
+    m, stims = make()
+    m.handle_payload(team_payload(events=[
+        {"EventID": 0, "EventName": "GameStart"},
+        {"EventID": 1, "EventName": "ChampionKill", "KillerName": ALLY,
+         "VictimName": ENEMY, "Assisters": [ME]},
+    ], game_time=5.0))
+    a = [s for s in stims if s.type == "assist"][0]
+    assert a.payload["target"] == "Darius"
+    assert a.payload["killer"] == "Lux"

@@ -69,6 +69,9 @@ class LolMapper:
         self._ally_lead_voiced: set[str] = set()
         self._team_gap_voiced: set[str] = set()
         self._last_ally_event_at = 0.0
+        # Последний килл журнала (killer, victim) — FirstBlood несёт только
+        # Recipient, жертву достаём из парного ChampionKill того же килла.
+        self._last_kill: tuple[Any, Any] = (None, None)
 
     # --- диагностика ---------------------------------------------------
 
@@ -223,6 +226,7 @@ class LolMapper:
         elif name == "ChampionKill":
             killer, victim = ev.get("KillerName"), ev.get("VictimName")
             assisters = ev.get("Assisters") or []
+            self._last_kill = (killer, victim)  # для парного FirstBlood
             if self._is_me(victim, me):
                 # Журнал авторитетен: разные EventID — разные смерти, друг с
                 # другом их не дедупим. Молчим только если isDead-страховка
@@ -239,7 +243,11 @@ class LolMapper:
                 self._emit("frag", {"target": self._champion_of(victim, players)},
                            Priority.HIGH, ttl_s=20)
             elif any(self._is_me(a, me) for a in assisters):
-                self._emit("assist", {"target": self._champion_of(victim, players)},
+                # killer — союзник, который добил: ЛЛМ должна знать, кто именно
+                # убил, чтобы не приписать килл (или смерть) стримеру.
+                self._emit("assist",
+                           {"target": self._champion_of(victim, players),
+                            "killer": self._champion_of(killer, players)},
                            Priority.LOW, ttl_s=10)
         elif name == "Multikill":
             killer = ev.get("KillerName")
@@ -260,10 +268,19 @@ class LolMapper:
                                  "label": label, "count": streak}, ttl_s=15)
         elif name == "FirstBlood":
             recipient = ev.get("Recipient")
+            # Жертва: из парного ChampionKill этого же килла (журнал шлёт их
+            # рядом). Не совпало — жертву не выдумываем (None).
+            last_killer, last_victim = self._last_kill
+            victim = (last_victim
+                      if self._name_key(last_killer) == self._name_key(recipient)
+                      else None)
             self._emit(
                 "first_blood",
                 {"by_me": self._is_me(recipient, me),
-                 "actor": self._champion_of(recipient, players)},
+                 "actor": self._champion_of(recipient, players),
+                 "side": self._side_of(recipient, me, players),
+                 "victim": self._champion_of(victim, players) if victim else None,
+                 "victim_me": self._is_me(victim, me)},
                 Priority.HIGH, ttl_s=15,
             )
         elif name in _OBJECTIVE_KINDS:
