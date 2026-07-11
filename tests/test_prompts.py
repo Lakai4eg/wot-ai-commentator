@@ -23,16 +23,34 @@ def order(text):
 
 def test_prompt_contains_core_flavor_event_and_facts():
     p = build_prompt(MODULE, game("ammo_rack"), ["это уже 2-я боеукладка"])
-    assert "режиссёр" in p.lower()          # ядро персоны
+    assert "стендапер" in p.lower()          # ядро персоны
     assert "Мир танков" in p                 # колорит модуля
     assert "боеукладк" in p.lower()          # описание события
     assert "2-я боеукладка" in p             # факты памяти
+
+
+def test_persona_core_roast_target_rule():
+    # Ядро задаёт правило мишени и не содержит старых смягчителей тона.
+    p = build_prompt(MODULE, game("frag"), [])
+    assert "тот, кто дал повод" in p
+    assert "по-доброму" not in p
+    assert "дружеская подколка" not in p.lower()
 
 
 def test_chat_order_wrapped_and_isolated():
     p = build_prompt(MODULE, order("похвали стримера"), [])
     assert "<заказ>похвали стримера</заказ>" in p
     assert "не инструкции" in p.lower() or "не команды" in p.lower()
+
+
+def test_chat_order_not_forced_about_streamer():
+    # Заказ зрителя не обязательно про стримера — случайный стиль обращения
+    # и случайный угол шутки к заказу не подсказываем, тему задаёт сам заказ.
+    module = dataclasses.replace(MODULE, joke_angles=lambda: ("угол-тест",))
+    p = build_prompt(module, order("поздравь зрителя vasya с днём рождения"), [])
+    assert "Обращение к стримеру на этот раз" not in p
+    assert "Угол шутки" not in p
+    assert "не обязательно про стримера" in p.lower()
 
 
 def test_chat_order_truncated():
