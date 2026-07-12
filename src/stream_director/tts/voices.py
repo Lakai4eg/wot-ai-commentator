@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-VOICES_DIR = Path("data") / "voices"
+from ..paths import VOICES_DIR
+
 # Голос без референса — собственный тембр модели.
 DEFAULT_VOICE = "default"
 _NAME_RE = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9_-]{1,32}$")

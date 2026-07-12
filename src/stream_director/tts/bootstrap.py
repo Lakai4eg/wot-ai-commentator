@@ -17,12 +17,11 @@ from typing import Callable
 
 import httpx
 
+from ..paths import MODEL_DIR, RUNTIME_DIR
 from .pins import RUNTIME_PACKAGES, TORCH_INDEX_URL, WEIGHTS, WEIGHTS_BASE_URL
 
 log = logging.getLogger(__name__)
 
-RUNTIME_DIR = Path("gpu-runtime")
-MODEL_DIR = Path("models") / "s1-mini"
 # Windows: не показывать консольное окно дочернего pip.
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 

@@ -5,9 +5,13 @@
 и веса S1-mini) в билд не кладётся — приложение докачивает его при первом
 старте. Спека: docs/superpowers/specs/2026-07-11-portable-windows-build-design.md.
 
+Раскладка версионированная (versions/<версия>/ + указатель current.txt) —
+её ожидают лаунчер и апдейтер. Спека автообновления:
+docs/superpowers/specs/2026-07-12-auto-update-design.md.
+
 Запуск из корня репо на Windows (Python 3.12+, Node 18+, MSVC cl.exe):
     python scripts/build_portable.py [--skip-launcher]
-Результат: build/StreamDirector-v<версия>-win64.zip
+Результат: build/StreamDirector-v<версия>-win64.zip и .zip.sha256 рядом
 """
 
 from __future__ import annotations
@@ -61,10 +65,10 @@ def download(url: str, dest: Path, sha256: str) -> Path:
     return dest
 
 
-def build_python() -> None:
+def build_python(dest: Path) -> None:
     print("== embedded python + зависимости")
     archive = download(PYTHON_EMBED_URL, CACHE / "python-embed.zip", PYTHON_EMBED_SHA256)
-    pydir = STAGE / "python"
+    pydir = dest / "python"
     with zipfile.ZipFile(archive) as z:
         z.extractall(pydir)
     (pydir / "python312._pth").write_text(PTH_CONTENT, encoding="ascii")
@@ -95,27 +99,41 @@ def build_web() -> None:
     subprocess.run([npm, "run", "build"], check=True, cwd=ROOT / "web")
 
 
-def copy_app() -> None:
+def copy_app(dest: Path) -> None:
     print("== исходники приложения")
     shutil.copytree(
         ROOT / "src" / "stream_director",
-        STAGE / "app" / "src" / "stream_director",
+        dest / "app" / "src" / "stream_director",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
-    shutil.copytree(ROOT / "web" / "dist", STAGE / "app" / "web" / "dist")
+    shutil.copytree(ROOT / "web" / "dist", dest / "app" / "web" / "dist")
 
 
-def build_launcher() -> None:
+def build_launcher(dest: Path) -> None:
     print("== лаунчер")
+    # /utf-8: без него MSVC читает исходник в кодовой странице машины (на
+    # русской Windows — 1251), и кириллица в MessageBoxW диалога отката
+    # превращается в мохибейк.
     subprocess.run(
         [
-            "cl", "/nologo", "/W4", "/O1",
+            "cl", "/nologo", "/W4", "/O1", "/utf-8",
             str(ROOT / "scripts" / "launcher.c"),
-            f"/Fe:{STAGE / 'StreamDirector.exe'}",
+            f"/Fe:{dest / 'StreamDirector.exe'}",
             f"/Fo:{BUILD / 'launcher.obj'}",
         ],
         check=True,
     )
+    # Копия в корне — то, что запускает пользователь. Оригинал остаётся внутри
+    # версии: апдейтер берёт новый лаунчер именно оттуда.
+    shutil.copy2(dest / "StreamDirector.exe", STAGE / "StreamDirector.exe")
+
+
+def write_checksum(zip_path: Path) -> Path:
+    """Апдейтеру нечем проверить целостность архива без опубликованной суммы."""
+    digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    out = zip_path.with_name(zip_path.name + ".sha256")
+    out.write_text(f"{digest}  {zip_path.name}\n", encoding="ascii")
+    return out
 
 
 def make_zip(version: str) -> Path:
@@ -137,16 +155,23 @@ def main() -> None:
 
     if STAGE.exists():
         shutil.rmtree(STAGE)
-    STAGE.mkdir(parents=True)
-
     version = read_version()
-    build_python()
+    # Версионированная раскладка: обновление распаковывает новую версию рядом
+    # со старой и переключает current.txt — ничего не перезаписывая на месте.
+    vdir = STAGE / "versions" / version
+    vdir.mkdir(parents=True)
+
+    build_python(vdir)
     build_web()
-    copy_app()
+    copy_app(vdir)
     if not args.skip_launcher:
-        build_launcher()
+        build_launcher(vdir)
+    (STAGE / "current.txt").write_text(version, encoding="utf-8")
+
     out = make_zip(version)
+    checksum = write_checksum(out)
     print(f"готово: {out} ({out.stat().st_size / 1e6:.0f} МБ)")
+    print(f"сумма:  {checksum}")
 
 
 if __name__ == "__main__":

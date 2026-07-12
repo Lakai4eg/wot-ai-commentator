@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-director"
-version = "0.5.0"
+version = "0.6.0"
 description = "AI-режиссёр стрима: видит игру, комментирует и развлекает зрителей"
 requires-python = ">=3.12"
 dependencies = [

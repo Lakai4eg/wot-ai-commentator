@@ -18,9 +18,9 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
-log = logging.getLogger(__name__)
+from ...paths import LOL_EVENTS_DIR as DEFAULT_DIR
 
-DEFAULT_DIR = Path("data") / "lol-events"
+log = logging.getLogger(__name__)
 
 
 class LolEventLog:

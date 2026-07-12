@@ -41,8 +41,14 @@ def main() -> int:
         print("FAIL: в дистрибутиве нет StreamDirector.exe")
         return 1
 
+    current = (args.dist / "current.txt").read_text(encoding="utf-8").strip()
+    if current != args.version:
+        print(f"FAIL: current.txt = {current!r} != {args.version!r}")
+        return 1
+
+    python = args.dist / "versions" / args.version / "python" / "python.exe"
     proc = subprocess.Popen(
-        [str(args.dist / "python" / "python.exe"), "-m", "stream_director"],
+        [str(python), "-m", "stream_director"],
         cwd=args.dist,
     )
     deadline = time.monotonic() + args.timeout

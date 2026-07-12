@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import webbrowser
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -25,15 +26,13 @@ from .director import Director
 from .games.base import ActiveGameTracker
 from .games.lol.module import build_module as build_lol_module
 from .games.wot.module import build_module as build_wot_module
+from .paths import DATA_DIR, DB_PATH, INSTALL, SETTINGS_PATH, migrate_state
 from .server import AppContext, create_app
 from .tts import S1MiniTTS
 from .update_check import apply_update_status
 
 log = logging.getLogger(__name__)
 
-DATA_DIR = Path("data")
-SETTINGS_PATH = DATA_DIR / "settings.json"
-DB_PATH = DATA_DIR / "chat-users.db"
 # БД под прежними именами приложения — подхватываем самую свежую.
 LEGACY_DB_NAMES = ("wot-ai-commentator.db", "stream-director.db")
 
@@ -48,6 +47,34 @@ def migrate_legacy_db(data_dir: Path = DATA_DIR, target: Path = DB_PATH) -> None
     newest = max(legacy, key=lambda p: p.stat().st_mtime)
     log.info("Мигрирую БД: %s → %s", newest.name, target.name)
     newest.rename(target)
+
+
+def mark_known_good() -> None:
+    """Версия поднялась — фиксируем её как рабочую и убираем остальные.
+
+    Лаунчер предлагает откат, пока known-good не равен current, поэтому старая
+    версия обязана дожить до этого момента — удаляем её только здесь. Вне
+    дистрибутива (разработка) версиями никто не управляет, делать нечего.
+    """
+    if INSTALL is None:
+        return
+    try:
+        current = (INSTALL / "current.txt").read_text(encoding="utf-8").strip()
+        if current != __version__:
+            # Указатель смотрит не на нас — значит, раскладка в рассогласовании
+            # (например, апдейтер упал на полпути). Убирать версии в такой
+            # ситуации нельзя: снесём ровно ту, которую лаунчер запустит следом.
+            log.warning("current.txt = %s, а работает %s — версии не трогаю",
+                        current, __version__)
+            return
+        (INSTALL / "known-good.txt").write_text(__version__, encoding="utf-8")
+        versions = INSTALL / "versions"
+        if versions.is_dir():
+            for entry in versions.iterdir():
+                if entry.is_dir() and entry.name != __version__:
+                    shutil.rmtree(entry, ignore_errors=True)
+    except OSError:
+        log.warning("не удалось записать known-good.txt", exc_info=True)
 
 
 async def supervised(name: str, run: Callable[[], Awaitable[None]],
@@ -82,11 +109,19 @@ async def open_panel_when_ready(
     open_url(url)
 
 
+async def mark_known_good_when_ready(server) -> None:
+    """Сервер принимает соединения — значит, версия рабочая."""
+    while not server.started:
+        await asyncio.sleep(0.2)
+    mark_known_good()
+
+
 async def run() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    DATA_DIR.mkdir(exist_ok=True)
+    migrate_state()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     migrate_legacy_db()
 
     settings = load_settings(SETTINGS_PATH)
@@ -182,6 +217,7 @@ async def run() -> None:
         asyncio.create_task(supervised("lol", lol.source.run)),
         # Одноразовая проверка обновлений: без supervised — сама глушит ошибки.
         asyncio.create_task(apply_update_status(ctx.statuses, __version__)),
+        asyncio.create_task(mark_known_good_when_ready(server)),
     ]
     # Portable-лаунчер просит открыть панель в браузере после старта сервера.
     if os.environ.get("STREAM_DIRECTOR_OPEN_PANEL") == "1":
