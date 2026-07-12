@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -17,14 +18,18 @@ from pydantic import BaseModel
 from . import __version__
 from .broadcast import OverlayBroadcaster
 from .chat.twitch import TwitchChatReader
+from .commentary.brief import BriefGenerator
+from .commentary.defaults import RESPONSE_FORMAT_KEY, game_base_key
 from .commentary.switch import SwitchBackend
 from .config import Settings, save_settings
-from .db import ROLES, ChatUserDB
+from .db import ROLES, ChatUserDB, PromptStore
 from .director import Director
 from .games.base import ActiveGameTracker
 from .tts import VOICES
 
 log = logging.getLogger(__name__)
+
+GAMES = ("wot", "lol")
 
 
 @dataclass
@@ -39,6 +44,8 @@ class AppContext:
     tracker: ActiveGameTracker | None = None
     backend: SwitchBackend | None = None
     chat: TwitchChatReader | None = None
+    store: PromptStore | None = None
+    briefs: BriefGenerator | None = None
     statuses: dict[str, Any] = field(default_factory=dict)
     # Свежая диагностика по запросу /api/status — вместо фонового полла.
     refresh_status: Callable[[], None] | None = None
@@ -62,19 +69,37 @@ class SettingsIn(BaseModel):
     chat_commands_enabled: bool | None = None
     commands_open_to_all: bool | None = None
     global_cooldown_s: float | None = None
-    debounce_s: float | None = None
-    debounce_max_s: float | None = None
+    debounce_window_s: float | None = None
     user_cooldown_s: float | None = None
     tts_max_age_s: float | None = None
+    active_persona_id: int | None = None
     default_voice: str | None = None
     voice_by_priority: dict[str, str] | None = None
     voice_overrides: dict[str, str] | None = None
-    template_mode: str | None = None
 
 
 class PreviewIn(BaseModel):
     voice: str | None = None
     text: str | None = None
+
+
+class PersonaIn(BaseModel):
+    name: str
+    text: str
+
+
+class PersonaPatch(BaseModel):
+    name: str | None = None
+    text: str | None = None
+
+
+class TextIn(BaseModel):
+    text: str
+
+
+def _check_game(game: str) -> None:
+    if game not in GAMES:
+        raise HTTPException(404, f"unknown game {game!r}")
 
 
 def _masked_settings(s: Settings) -> dict:
@@ -97,15 +122,13 @@ def create_app(ctx: AppContext) -> FastAPI:
         data = patch.model_dump(exclude_none=True)
         if "llm_provider" in data and data["llm_provider"] not in ("gemini", "openai"):
             raise HTTPException(400, "llm_provider must be 'gemini' or 'openai'")
-        if "template_mode" in data and data["template_mode"] not in ("seed", "verbatim", "off"):
-            raise HTTPException(400, "template_mode must be 'seed', 'verbatim' or 'off'")
         # Маска из GET («••••••••») — не настоящий ключ: молча игнорируем,
         # чтобы случайный PUT маски не затёр сохранённый ключ.
         for key in ("gemini_api_key", "openai_api_key"):
             value = data.get(key)
             if value and set(value) == {"•"}:
                 data.pop(key)
-        for key in ("global_cooldown_s", "debounce_s", "debounce_max_s",
+        for key in ("global_cooldown_s", "debounce_window_s",
                     "user_cooldown_s", "tts_max_age_s"):
             if key in data and data[key] < 0:
                 raise HTTPException(400, f"{key} must be >= 0")
@@ -128,6 +151,106 @@ def create_app(ctx: AppContext) -> FastAPI:
         )
         ctx.statuses["llm_last_error"] = ctx.backend.last_error
         return {"ok": text is not None, "reply": text, "error": ctx.backend.last_error}
+
+    @app.get("/api/prompts")
+    async def get_prompts():
+        store = ctx.store
+        games = {}
+        for game in GAMES:
+            brief = store.get_brief(game)
+            games[game] = {
+                "base": store.get_prompt(game_base_key(game)),
+                "base_customized": store.is_customized(game_base_key(game)),
+                "brief": brief.text if brief else "",
+                "subject": brief.subject if brief else "",
+                "generated_at": brief.generated_at if brief else "",
+                "error": (ctx.briefs.last_error.get(game) if ctx.briefs else None),
+            }
+        return {
+            "personas": store.list_personas(),
+            "active_persona_id": ctx.settings.active_persona_id,
+            "response_format": store.get_prompt(RESPONSE_FORMAT_KEY),
+            "response_format_customized": store.is_customized(RESPONSE_FORMAT_KEY),
+            "games": games,
+        }
+
+    @app.post("/api/personas", status_code=201)
+    async def create_persona(body: PersonaIn):
+        try:
+            persona_id = ctx.store.create_persona(body.name, body.text)
+        except (ValueError, sqlite3.IntegrityError) as e:
+            raise HTTPException(400, str(e))
+        return {"id": persona_id}
+
+    @app.put("/api/personas/{persona_id}")
+    async def update_persona(persona_id: int, body: PersonaPatch):
+        if not ctx.store.update_persona(persona_id, body.name, body.text):
+            raise HTTPException(404, "persona not found")
+        return {"ok": True}
+
+    @app.delete("/api/personas/{persona_id}")
+    async def delete_persona(persona_id: int):
+        if not ctx.store.delete_persona(persona_id):
+            raise HTTPException(400, "встроенный пресет не удаляется")
+        if ctx.settings.active_persona_id == persona_id:
+            builtin = next((p for p in ctx.store.list_personas() if p["is_builtin"]), None)
+            ctx.settings.active_persona_id = builtin["id"] if builtin else 1
+            save_settings(ctx.settings, ctx.settings_path)
+        return {"ok": True}
+
+    @app.post("/api/personas/{persona_id}/reset")
+    async def reset_persona(persona_id: int):
+        if not ctx.store.reset_persona(persona_id):
+            raise HTTPException(400, "сбрасывается только встроенный пресет")
+        return {"ok": True}
+
+    @app.put("/api/prompts/response_format")
+    async def put_response_format(body: TextIn):
+        ctx.store.set_prompt(RESPONSE_FORMAT_KEY, body.text)
+        return {"ok": True}
+
+    @app.post("/api/prompts/response_format/reset")
+    async def reset_response_format():
+        ctx.store.reset_prompt(RESPONSE_FORMAT_KEY)
+        return {"text": ctx.store.get_prompt(RESPONSE_FORMAT_KEY)}
+
+    @app.put("/api/prompts/game/{game}/base")
+    async def put_game_base(game: str, body: TextIn):
+        _check_game(game)
+        ctx.store.set_prompt(game_base_key(game), body.text)
+        return {"ok": True}
+
+    @app.post("/api/prompts/game/{game}/base/reset")
+    async def reset_game_base(game: str):
+        _check_game(game)
+        ctx.store.reset_prompt(game_base_key(game))
+        return {"text": ctx.store.get_prompt(game_base_key(game))}
+
+    @app.put("/api/prompts/game/{game}/brief")
+    async def put_game_brief(game: str, body: TextIn):
+        _check_game(game)
+        current = ctx.store.get_brief(game)
+        subject = current.subject if current else ""
+        if not subject:
+            # Правка до первой генерации: тему берём у модуля. Иначе директор,
+            # сверяющий тему брифа с текущей техникой, счёл бы бриф чужим.
+            module = ctx.director.games.get(game)
+            subject = (module.brief_subject() or "") if module else ""
+        ctx.store.save_brief(game, subject, body.text)
+        return {"ok": True}
+
+    @app.post("/api/prompts/game/{game}/brief/regenerate")
+    async def regenerate_brief(game: str):
+        _check_game(game)
+        module = ctx.director.games.get(game)
+        if module is None or ctx.briefs is None:
+            raise HTTPException(503, "модуль игры не готов")
+        text = await ctx.briefs.generate(module)
+        if text is None:
+            raise HTTPException(503, ctx.briefs.last_error.get(game) or "не удалось")
+        brief = ctx.store.get_brief(game)
+        return {"brief": brief.text, "subject": brief.subject,
+                "generated_at": brief.generated_at}
 
     @app.get("/api/users")
     async def list_users():

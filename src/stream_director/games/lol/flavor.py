@@ -1,65 +1,35 @@
-"""LoL-колорит: описания событий, сленг-блок для промпта."""
+"""LoL-колорит: перевод стимулов в GameEvent (факты + мишень)."""
 
 from __future__ import annotations
 
+from ...commentary.events import GameEvent
 from ...stimulus import Stimulus
 
-_FLAVOR = (
-    "Игра на стриме — League of Legends.\n"
-    "- Мишень — тот, кто дал повод: стример, тиммейты («тиммейты виноваты» — "
-    "вечная классика), джунглер, который «опять не ганкает», фидер, противники — "
-    "прожарка без поблажек любому.\n"
-    "- Сленг LoL умеренно: ферма, ганк, вард, пуш, фид, скейлинг — но так, "
-    "чтобы шутку понял и новичок. Реагируй на то, что реально происходит, "
-    "без заученных мемов про конкретных чемпионов."
-    "\n- Не путай, кто кого убил: в описании события всегда названы убийца и "
-    "жертва. Если умер союзник или противник — стримера не хорони; прожаривай "
-    "ровно тех, кто назван."
-)
-
-_EVENT_DESCRIPTIONS = {
-    "battle_start": (
-        "Матч на Ущелье призывателей только начался — стример выходит за {champion_ru}. "
-        "Поприветствуй зрителей и задай тон стриму — коротко, с иронией."
-    ),
-    "frag": "Стример убил вражеского чемпиона {target}.",
-    "death": "Стримера убил {killer}.",
-    "assist": (
-        "Стример записал ассист — помог{assist_killer_ru} убить {target}. "
-        "Сам стример жив и лично никого не убил."
-    ),
-    "multikill": "Стример собрал {label} ({count} убийства подряд)!",
-    "first_blood": "Первая кровь матча: {note}.",
-    "objective": "{side_ru}: {kind}.{stolen_note}",
-    "turret": "Стример добил вражескую башню.",
-    "turret_ours": (
-        "Команда стримера снесла башню противника — добил союзник или миньоны, "
-        "лично стример её не добивал."
-    ),
-    "turret_theirs": "Противник снёс башню команды стримера.",
-    "inhib": "Стример снёс ингибитор противника.",
-    "ace": "{ace_ru}",
-    "battle_result": "Игра окончена: {outcome_ru}.",
-    "ally_feeding": (
-        "Союзник стримера на чемпионе {champion} набрал уже {deaths} смертей. "
-        "Прожарь союзника-«кормильца» команды — мишень он, не стример."
-    ),
-    "ally_carrying_multikill": (
-        "Союзник {champion} собрал {label}! Союзнику — ядовитое уважение, "
-        "стримеру — прожарка: пока он смотрел, играли за него."
-    ),
-    "ally_carrying_lead": (
-        "Союзник {champion} набрал {kills} убийств против {my_kills} у стримера. "
-        "Союзнику — ядовитое уважение, стримера прожарь: кто-то тащит вместо него."
-    ),
-    "team_gap_spectator": (
-        "Игра идёт уже больше десяти минут, у команды {team_kills} убийств, "
-        "а у стримера всё ещё 0/0/0. Подколи стримера-наблюдателя."
-    ),
-    "team_gap_behind": (
-        "Команда стримера отстаёт от противника на {diff} убийств. "
-        "Прожарь всю команду разом."
-    ),
+# ключ (из variant_key) → (шаблон факта, кого прожаривать)
+_HEADLINES = {
+    "battle_start": ("Матч на Ущелье призывателей начался — стример выходит "
+                     "за {champion_ru}.", "streamer"),
+    "frag": ("Стример убил вражеского чемпиона {target}.", "enemy"),
+    "death": ("Стримера убил {killer}.", "streamer"),
+    "assist": ("Стример записал ассист — помог{assist_killer_ru} убить {target}. "
+               "Сам стример жив и лично никого не убил.", "enemy"),
+    "multikill": ("Стример собрал {label} ({count} убийства подряд).", "streamer"),
+    "first_blood": ("Первая кровь матча: {note}.", "none"),
+    "objective": ("{side_ru}: {kind}.", "none"),
+    "turret": ("Стример добил вражескую башню.", "enemy"),
+    "turret_ours": ("Команда стримера снесла башню противника — добил союзник "
+                    "или миньоны, лично стример её не добивал.", "team"),
+    "turret_theirs": ("Противник снёс башню команды стримера.", "team"),
+    "inhib": ("Стример снёс ингибитор противника.", "enemy"),
+    "ace": ("{ace_ru}", "none"),
+    "ally_feeding": ("Союзник стримера на чемпионе {champion} набрал уже "
+                     "{deaths} смертей.", "ally"),
+    "ally_carrying_multikill": ("Союзник {champion} собрал {label}.", "streamer"),
+    "ally_carrying_lead": ("Союзник {champion} набрал {kills} убийств против "
+                           "{my_kills} у стримера.", "streamer"),
+    "team_gap_spectator": ("Игра идёт больше десяти минут, у команды {team_kills} "
+                           "убийств, а у стримера всё ещё 0/0/0.", "streamer"),
+    "team_gap_behind": ("Команда стримера отстаёт от противника на {diff} убийств.", "team"),
 }
 
 
@@ -85,10 +55,6 @@ def variant_key(stimulus: Stimulus) -> str:
     return t
 
 
-def flavor_lines() -> str:
-    return _FLAVOR
-
-
 _JOKE_ANGLES = (
     "подколи союзника, если контекст даёт повод (фидер, керри, джунглер)",
     "злорадство над тем, кому только что не повезло",
@@ -107,7 +73,7 @@ def joke_angles() -> tuple[str, ...]:
     return _JOKE_ANGLES
 
 
-def describe_event(stimulus: Stimulus) -> str:
+def build_event(stimulus: Stimulus) -> GameEvent:
     p = dict(stimulus.payload)
     p.setdefault("target", "противника")
     p.setdefault("killer", "противник")
@@ -126,7 +92,6 @@ def describe_event(stimulus: Stimulus) -> str:
         "ours": "Команда стримера забрала объект",
         "theirs": "Противник забрал объект",
     }.get(side, "На карте взяли объект")  # unknown — не приписываем сторону
-    p["stolen_note"] = (" Объект УКРАДЕН из-под носа — драма!" if p.get("stolen") else "")
     # assist: добивший союзник — из payload события, не из setdefault killer.
     ally_killer = stimulus.payload.get("killer") if stimulus.type == "assist" else None
     p["assist_killer_ru"] = f" союзнику {ally_killer}" if ally_killer else ""
@@ -149,8 +114,43 @@ def describe_event(stimulus: Stimulus) -> str:
     p["ace_ru"] = ("Команда стримера оформила эйс — вся вражеская пятёрка мертва."
                    if side == "ours"
                    else "Эйс у противника — вся команда стримера полегла.")
-    p["outcome_ru"] = "победа" if p.get("outcome") == "win" else "поражение"
+
     key = variant_key(stimulus)
-    template = (_EVENT_DESCRIPTIONS.get(key)
-                or _EVENT_DESCRIPTIONS.get(stimulus.type, f"Событие: {stimulus.type}."))
-    return template.format_map(p)
+    template, roast = (_HEADLINES.get(key)
+                       or _HEADLINES.get(stimulus.type,
+                                         (f"Событие: {stimulus.type}.", "none")))
+    facts: list[str] = []
+
+    # Ветвящиеся события: мишень зависит от стороны, а не только от типа.
+    if key.startswith("objective_"):
+        roast = "enemy" if p.get("side") == "ours" else "team"
+        if p.get("stolen"):
+            facts.append("объект УКРАДЕН из-под носа — драма")
+    elif key == "ace_ours":
+        roast = "enemy"
+    elif key == "ace_theirs":
+        roast = "team"
+    elif stimulus.type == "first_blood":
+        if p.get("by_me") or p.get("side") == "ours":
+            roast = "enemy"
+        elif p.get("victim_me"):
+            roast = "streamer"
+        else:
+            roast = "ally"
+    elif key == "ally_carrying_multikill":
+        facts.append("союзнику — ядовитое уважение, стримеру — прожарка: "
+                     "пока он смотрел, играли за него")
+    elif key == "ally_carrying_lead":
+        facts.append("кто-то тащит вместо стримера")
+
+    return GameEvent(
+        type=key,
+        headline=template.format_map(p),
+        roast_target=roast,
+        side=str(p.get("side") or "neutral"),
+        # actor/target — из исходного payload: подставленные заглушки тут не нужны.
+        actor=stimulus.payload.get("actor") or stimulus.payload.get("champion"),
+        target=stimulus.payload.get("target"),
+        facts=facts,
+        importance=stimulus.priority,
+    )

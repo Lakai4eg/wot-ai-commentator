@@ -28,13 +28,13 @@ class Settings:
     # кому выдана роль banned. Выключено — работает только белый список.
     commands_open_to_all: bool = False
     global_cooldown_s: float = 4.0
-    # Дебаунс фраз: в буре мелких событий не частим — ждём паузу debounce_s,
-    # чтобы всплеск схлопнулся в одну реплику про самое важное. Но не молчим
-    # дольше debounce_max_s даже в непрерывном замесе. Крупные события (фраг,
-    # смерть, пожар, детонация) и заказы из чата дебаунс не задерживает.
-    debounce_s: float = 1.2
-    debounce_max_s: float = 5.0
+    # Окно склейки: первое игровое событие открывает окно, все события, попавшие
+    # в него, уходят в LLM одним промптом и дают ОДНУ реплику. Крупные события
+    # (смерть, мультикилл) закрывают окно немедленно. Чат-заказы !dir идут мимо.
+    debounce_window_s: float = 3.0
     user_cooldown_s: float = 60.0
+    # Активный пресет персоны (id в таблице personas); 1 — встроенный.
+    active_persona_id: int = 1
     # WebSocket мода wotstat-data-provider — источник событий боя WoT.
     wotstat_url: str = "ws://localhost:38200"
     # Riot Live Client Data API — локальный HTTPS живого матча LoL.
@@ -51,9 +51,6 @@ class Settings:
     default_voice: str = "baya"
     voice_by_priority: dict[str, str] = field(default_factory=dict)
     voice_overrides: dict[str, str] = field(default_factory=dict)
-    # Шаблоны-заготовки LoL: "seed" — затравка для LLM, "verbatim" — сначала
-    # дословно, "off" — только фолбэк при мёртвой LLM.
-    template_mode: str = "seed"
 
 
 def load_settings(path: str | Path) -> Settings:
@@ -69,9 +66,6 @@ def load_settings(path: str | Path) -> Settings:
     except TypeError:
         log.warning("settings.json contains invalid values, using defaults")
         return Settings()
-    if settings.template_mode not in ("seed", "verbatim", "off"):
-        log.warning("неизвестный template_mode %r — беру 'seed'", settings.template_mode)
-        settings.template_mode = "seed"
     return settings
 
 

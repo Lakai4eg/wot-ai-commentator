@@ -198,8 +198,11 @@ class LolMapper:
             return
         self._started = True
         gd = data.get("gameData") or {}
+        # position Live Client API отдаёт как TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY;
+        # пустая строка означает режим без ролей — тогда None.
         meta = {"map": gd.get("mapName"), "mode": gd.get("gameMode"),
-                "champion": (me or {}).get("championName")}
+                "champion": (me or {}).get("championName"),
+                "position": (me or {}).get("position") or None}
         # Начало матча — единственная точка на игру: заводим новый файл журнала.
         self._event_log.start_game({**meta, "silent": silent})
         self._emit("battle_start", {**meta, "silent": silent})

@@ -19,14 +19,38 @@ export interface SettingsDto {
   chat_commands_enabled: boolean;
   commands_open_to_all: boolean;
   global_cooldown_s: number;
-  debounce_s: number;
-  debounce_max_s: number;
+  debounce_window_s: number;
   user_cooldown_s: number;
   tts_max_age_s: number;
+  active_persona_id: number;
   default_voice: string;
   voice_by_priority: Record<string, string>;
   voice_overrides: Record<string, string>;
-  template_mode: "seed" | "verbatim" | "off";
+}
+
+export interface Persona {
+  id: number;
+  name: string;
+  text: string;
+  is_builtin: number;
+  created_at: string;
+}
+
+export interface GamePromptsDto {
+  base: string;
+  base_customized: boolean;
+  brief: string;
+  subject: string;
+  generated_at: string;
+  error: string | null;
+}
+
+export interface PromptsDto {
+  personas: Persona[];
+  active_persona_id: number;
+  response_format: string;
+  response_format_customized: boolean;
+  games: Record<string, GamePromptsDto>;
 }
 
 export interface StatusDto {
@@ -79,6 +103,28 @@ export const api = {
       method: "POST",
     }),
   getVoices: () => req<{ voices: string[] }>("/api/voices"),
+  getPrompts: () => req<PromptsDto>("/api/prompts"),
+  createPersona: (name: string, text: string) =>
+    req<{ id: number }>("/api/personas", { method: "POST", body: JSON.stringify({ name, text }) }),
+  updatePersona: (id: number, patch: { name?: string; text?: string }) =>
+    req(`/api/personas/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deletePersona: (id: number) => req(`/api/personas/${id}`, { method: "DELETE" }),
+  resetPersona: (id: number) => req(`/api/personas/${id}/reset`, { method: "POST" }),
+  putResponseFormat: (text: string) =>
+    req("/api/prompts/response_format", { method: "PUT", body: JSON.stringify({ text }) }),
+  resetResponseFormat: () =>
+    req<{ text: string }>("/api/prompts/response_format/reset", { method: "POST" }),
+  putGameBase: (game: string, text: string) =>
+    req(`/api/prompts/game/${game}/base`, { method: "PUT", body: JSON.stringify({ text }) }),
+  resetGameBase: (game: string) =>
+    req<{ text: string }>(`/api/prompts/game/${game}/base/reset`, { method: "POST" }),
+  putGameBrief: (game: string, text: string) =>
+    req(`/api/prompts/game/${game}/brief`, { method: "PUT", body: JSON.stringify({ text }) }),
+  regenerateBrief: (game: string) =>
+    req<{ brief: string; subject: string; generated_at: string }>(
+      `/api/prompts/game/${game}/brief/regenerate`,
+      { method: "POST" },
+    ),
   previewVoice: (voice: string) =>
     fetch("/api/tts/preview", {
       method: "POST",

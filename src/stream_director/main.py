@@ -15,11 +15,12 @@ from . import __version__
 from .broadcast import OverlayBroadcaster
 from .chat.router import ChatRouter
 from .chat.twitch import TwitchChatReader
+from .commentary.brief import BriefGenerator
 from .commentary.gemini import GeminiBackend
 from .commentary.openai_compat import OpenAICompatBackend
 from .commentary.switch import SwitchBackend
 from .config import load_settings
-from .db import ChatUserDB
+from .db import ChatUserDB, Database, PromptStore
 from .director import Director
 from .games.base import ActiveGameTracker
 from .games.lol.module import build_module as build_lol_module
@@ -89,7 +90,9 @@ async def run() -> None:
     migrate_legacy_db()
 
     settings = load_settings(SETTINGS_PATH)
-    db = ChatUserDB(DB_PATH)
+    database = Database(DB_PATH)
+    db = ChatUserDB(database)
+    store = PromptStore(database)
     backend = SwitchBackend(
         settings,
         GeminiBackend(settings.gemini_api_key, settings.gemini_model, settings.reply_timeout_s),
@@ -103,7 +106,8 @@ async def run() -> None:
 
     tracker = ActiveGameTracker(default="wot")
     broadcaster = OverlayBroadcaster(settings)
-    director = Director(settings, backend, broadcaster.publish, tracker)
+    briefs = BriefGenerator(backend, store, settings)
+    director = Director(settings, backend, broadcaster.publish, tracker, store, briefs)
 
     # Чат
     router = ChatRouter(db, director, settings)
@@ -118,6 +122,8 @@ async def run() -> None:
         tracker=tracker,
         backend=backend,
         chat=chat,
+        store=store,
+        briefs=briefs,
     )
 
     # Игровые модули: источники всегда запущены, активную игру решает трекер.
@@ -195,7 +201,7 @@ async def run() -> None:
         for t in tasks:
             t.cancel()
         await backend.close()
-        db.close()
+        database.close()
 
 
 def main() -> None:

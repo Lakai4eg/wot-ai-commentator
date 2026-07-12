@@ -42,7 +42,7 @@ section {
 
 label { display: block; margin-bottom: 10px; font-size: 14px; color: #b9b9c3; }
 
-input, select, button {
+input, select, button, textarea {
   font: inherit;
   background: #101014;
   color: #e8e8ec;
@@ -51,7 +51,7 @@ input, select, button {
   padding: 8px 10px;
 }
 
-input:focus, select:focus { outline: 1px solid #ffb454; }
+input:focus, select:focus, textarea:focus { outline: 1px solid #ffb454; }
 
 button {
   cursor: pointer;
@@ -59,6 +59,17 @@ button {
 }
 button:hover { background: #33333d; }
 button.danger { color: #ff7a7a; }
+
+.panel textarea.prompt {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 8rem;
+  margin: 4px 0 8px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.panel button.ghost { opacity: 0.55; }
 
 .row { display: flex; gap: 8px; margin-top: 4px; }
 .row input { flex: 1; }

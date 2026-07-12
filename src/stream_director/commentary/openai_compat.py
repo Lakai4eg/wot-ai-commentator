@@ -39,7 +39,8 @@ class OpenAICompatBackend:
             self._client = httpx.AsyncClient(timeout=self.timeout_s)
         return self._client
 
-    async def generate(self, prompt: str) -> str | None:
+    async def generate(self, prompt: str, *, max_tokens: int = 80,
+                       timeout_s: float | None = None) -> str | None:
         if not self.configured:
             self.last_error = "base_url или модель не заданы"
             return None
@@ -50,11 +51,11 @@ class OpenAICompatBackend:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 80,
+            "max_tokens": max_tokens,
         }
         try:
             resp = await self._get_client().post(
-                url, json=payload, headers=headers, timeout=self.timeout_s
+                url, json=payload, headers=headers, timeout=timeout_s or self.timeout_s
             )
             if resp.status_code != 200:
                 self.last_error = f"HTTP {resp.status_code}"

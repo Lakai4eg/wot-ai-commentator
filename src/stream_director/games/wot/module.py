@@ -8,7 +8,7 @@ from ...config import Settings
 from ...stimulus import Stimulus
 from ..base import GameModule
 from .client import WotStatClient
-from .flavor import describe_event, fallback_line, flavor_lines
+from .flavor import build_event
 from .mapper import WotMapper
 from .memory import WotSessionMemory
 
@@ -20,14 +20,14 @@ def build_module(
 ) -> GameModule:
     client = WotStatClient(settings.wotstat_url, on_live=on_live)
     mapper = WotMapper(client, submit=submit)
+    memory = WotSessionMemory()
     return GameModule(
         id="wot",
         display_name="Мир танков",
         source=client,
-        memory=WotSessionMemory(),
-        describe_event=describe_event,
-        flavor_lines=flavor_lines,
-        fallback_line=fallback_line,
+        memory=memory,
+        build_event=build_event,
+        brief_subject=lambda: memory.brief_subject(),
         always_speak_types=frozenset({"death"}),
         diag=lambda: mapper.diag,
     )

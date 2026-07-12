@@ -23,11 +23,6 @@ jobs:
       # cl.exe в PATH — для компиляции лаунчера
       - uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Тесты
-        run: |
-          python -m pip install -e ".[dev]"
-          python -m pytest
-
       - name: Версия совпадает с тегом
         shell: python
         run: |

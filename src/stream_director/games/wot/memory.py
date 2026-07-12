@@ -16,10 +16,13 @@ class WotBattleMemory:
     """Счётчики текущего боя; сбрасываются на battle_start."""
 
     def __init__(self, map_name: str | None = None, mode: str | None = None,
-                 tank: str | None = None) -> None:
+                 tank: str | None = None, vehicle_class: str | None = None,
+                 tier: int | None = None) -> None:
         self.map = map_name
         self.mode = mode
         self.tank = tank
+        self.vehicle_class = vehicle_class
+        self.tier = tier
         self.frags = 0
         self.damage_dealt = 0
         self.damage_received = 0
@@ -37,7 +40,9 @@ class WotBattleMemory:
         if self.map:
             out.append(f"карта: {self.map}")
         if self.tank:
-            out.append(f"танк стримера: {self.tank}")
+            details = ", ".join(p for p in (self.vehicle_class,
+                                            f"тир {self.tier}" if self.tier else None) if p)
+            out.append(f"танк стримера: {self.tank}" + (f" ({details})" if details else ""))
         if self.damage_dealt:
             out.append(f"урон за бой: {self.damage_dealt}")
         if self.frags:
@@ -84,6 +89,8 @@ class WotSessionMemory:
         self.blocked_count = 0
         self.low_hp_events = 0
         self.current_tank: str | None = None
+        self.current_class: str | None = None
+        self.current_tier: int | None = None
 
     def register(self, stimulus: Stimulus) -> list[str]:
         """Обновляет оба масштаба; возвращает контекст-факты для промпта."""
@@ -162,14 +169,30 @@ class WotSessionMemory:
         elif t == "battle_start":
             # Новый бой — свежая боевая память, танк переносим из ангара.
             self.battle = WotBattleMemory(
-                map_name=p.get("map"), mode=p.get("mode"), tank=self.current_tank
+                map_name=p.get("map"), mode=p.get("mode"), tank=self.current_tank,
+                vehicle_class=self.current_class, tier=self.current_tier,
             )
         elif t == "vehicle_change":
             tank = str(p.get("tank") or "").strip()
             if tank:
                 self.current_tank = tank
+                self.current_class = p.get("vehicle_class")
+                self.current_tier = p.get("tier")
                 self.battle.tank = tank
+                self.battle.vehicle_class = self.current_class
+                self.battle.tier = self.current_tier
         return facts
+
+    def brief_subject(self) -> str | None:
+        """Тема брифа: «Т-100, ЛТ, тир 10». Танк неизвестен — None."""
+        if not self.current_tank:
+            return None
+        parts = [self.current_tank]
+        if self.current_class:
+            parts.append(self.current_class)
+        if self.current_tier:
+            parts.append(f"тир {self.current_tier}")
+        return ", ".join(parts)
 
     def battle_lines(self) -> list[str]:
         """Контекст текущего боя — основа каждой реплики."""

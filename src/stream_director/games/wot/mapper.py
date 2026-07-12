@@ -31,6 +31,16 @@ _ACCUM_STEP = 200
 # Доля ХП, ниже которой считаем «на грани».
 _LOW_HP_FRACTION = 0.2
 
+# Метки классов в WotStat приходят по-разному: "LT"/"lightTank"/"AT-SPG".
+# Порядок важен: ПТ (AT-SPG) содержит подстроку SPG, поэтому проверяется раньше САУ.
+_CLASS_RU = (
+    ("at-spg", "ПТ"), ("at_spg", "ПТ"), ("atspg", "ПТ"), ("td", "ПТ"),
+    ("lighttank", "ЛТ"), ("lt", "ЛТ"),
+    ("mediumtank", "СТ"), ("mt", "СТ"),
+    ("heavytank", "ТТ"), ("ht", "ТТ"),
+    ("spg", "САУ"),
+)
+
 
 class WotMapper:
     """Переводит поток состояний и триггеров WotStat в игровые стимулы."""
@@ -75,6 +85,7 @@ class WotMapper:
 
     def _reset_battle_trackers(self) -> None:
         self._last_attacker: str | None = None  # для события смерти
+        self._last_attacker_class: str | None = None  # класс обидчика — в payload смерти
         self._assist_emitted = 0  # значение накопителя на момент последней реплики
         self._blocked_emitted = 0
         self._damage_milestone = 0  # достигнутая веха урона (в тысячах)
@@ -112,6 +123,23 @@ class WotMapper:
             str(vehicle.get(k) or "") for k in ("class", "classTag", "type", "tag")
         ]
         return any(m == "LT" or "lighttank" in m.lower() for m in markers)
+
+    @staticmethod
+    def _vehicle_class(vehicle: Any) -> str | None:
+        """Класс техники (ЛТ/СТ/ТТ/ПТ/САУ) или None, если меток нет."""
+        if not isinstance(vehicle, dict):
+            return None
+        markers = [str(vehicle.get(k) or "").strip().lower()
+                   for k in ("class", "classTag", "type", "tag")]
+        for marker in markers:
+            for needle, ru in _CLASS_RU:
+                if marker == needle:
+                    return ru
+        for marker in markers:
+            for needle, ru in _CLASS_RU:  # ПТ проверяется раньше САУ — см. _CLASS_RU
+                if needle in marker:
+                    return ru
+        return None
 
     @staticmethod
     def _vehicle_name(vehicle: Any) -> str:
@@ -177,6 +205,7 @@ class WotMapper:
             # Запоминаем обидчика — пригодится для события смерти.
             if isinstance(attacker, dict):
                 self._last_attacker = self._vehicle_name(attacker)
+                self._last_attacker_class = self._vehicle_class(attacker)
             if reason == "fire":
                 # Пожар — отдельное событие с дедупом (тикает часто).
                 self._maybe_fire()
@@ -187,6 +216,7 @@ class WotMapper:
             payload = {
                 "amount": damage,
                 "source": self._vehicle_name(attacker),
+                "source_class": self._vehicle_class(attacker),
                 "reason": reason,
             }
             if self._is_spg(attacker):
@@ -270,7 +300,10 @@ class WotMapper:
         if old and not new:
             self._emit(
                 "death",
-                {"killer": self._last_attacker or "неизвестный"},
+                {
+                    "killer": self._last_attacker or "неизвестный",
+                    "killer_class": self._last_attacker_class,
+                },
                 Priority.HIGH,
                 ttl_s=30,
             )
@@ -359,7 +392,17 @@ class WotMapper:
         if not new:
             return
         tank = self._vehicle_name(new) if isinstance(new, dict) else str(new)
-        self._emit("vehicle_change", {"tank": tank, "silent": True}, Priority.NORMAL, ttl_s=20)
+        self._emit(
+            "vehicle_change",
+            {
+                "tank": tank,
+                "vehicle_class": self._vehicle_class(new),
+                "tier": self._vehicle_level(new),
+                "silent": True,
+            },
+            Priority.NORMAL,
+            ttl_s=20,
+        )
         # «Всеми любимые» танки 11 уровня — отдельный повод для подколки.
         if self._vehicle_level(new) == 11:
             self._emit("tier11", {"tank": tank}, Priority.NORMAL, ttl_s=20)

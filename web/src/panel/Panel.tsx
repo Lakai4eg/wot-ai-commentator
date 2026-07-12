@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ChatUser, SettingsDto, StatusDto } from "../shared/api";
+import { api, ChatUser, PromptsDto, SettingsDto, StatusDto } from "../shared/api";
 
 function Badge({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
   return (
@@ -19,20 +19,60 @@ export function Panel() {
   const [message, setMessage] = useState("");
   const [voices, setVoices] = useState<string[]>([]);
   const [newOverrideType, setNewOverrideType] = useState("");
+  const [prompts, setPrompts] = useState<PromptsDto | null>(null);
+  const [personaDraft, setPersonaDraft] = useState("");
+  const [formatDraft, setFormatDraft] = useState("");
+  const [baseDraft, setBaseDraft] = useState("");
+  const [briefDraft, setBriefDraft] = useState("");
+  const [newPersonaName, setNewPersonaName] = useState("");
+  const [game, setGame] = useState<"wot" | "lol">("wot");
 
   const refreshUsers = useCallback(() => {
     api.listUsers().then(setUsers).catch(() => {});
   }, []);
 
+  const reloadPrompts = useCallback(() => {
+    api.getPrompts().then(setPrompts).catch(() => {});
+  }, []);
+
+  // Правки промптов сохраняются «в фоне» (onBlur, кнопки). Без общего .catch
+  // упавший запрос молчал бы: пользователь думал бы, что текст сохранён.
+  const savePrompt = useCallback(
+    (request: Promise<unknown>) =>
+      request
+        .then(() => {
+          reloadPrompts();
+          setMessage("Сохранено");
+          setTimeout(() => setMessage(""), 1500);
+        })
+        .catch((e) => setMessage(String(e))),
+    [reloadPrompts],
+  );
+
   useEffect(() => {
     api.getSettings().then(setSettings).catch(() => setMessage("Сервер недоступен"));
     refreshUsers();
+    reloadPrompts();
     api.getVoices().then((v) => setVoices(v.voices)).catch(() => {});
     const t = setInterval(() => api.getStatus().then(setStatus).catch(() => {}), 2000);
     return () => clearInterval(t);
-  }, [refreshUsers]);
+  }, [refreshUsers, reloadPrompts]);
+
+  // Черновики textarea живут отдельно от загруженных промптов: правка уходит
+  // на сервер по onBlur, а после перезагрузки промптов черновики пересобираются.
+  const activePersonaId = settings?.active_persona_id;
+  useEffect(() => {
+    if (!prompts) return;
+    const persona = prompts.personas.find((p) => p.id === activePersonaId);
+    setPersonaDraft(persona?.text ?? "");
+    setFormatDraft(prompts.response_format);
+    setBaseDraft(prompts.games[game]?.base ?? "");
+    setBriefDraft(prompts.games[game]?.brief ?? "");
+  }, [prompts, game, activePersonaId]);
 
   if (!settings) return <div className="panel">Загрузка…</div>;
+
+  const activePersona = prompts?.personas.find((p) => p.id === settings.active_persona_id);
 
   const LLM_FIELDS = [
     "llm_provider", "gemini_api_key", "gemini_model",
@@ -227,18 +267,18 @@ export function Panel() {
             Команды всем (кроме забаненных)
           </label>
         </div>
-        <label className="check">
-          Шаблоны реплик (LoL)
-          <select
-            value={settings.template_mode}
+        <label>
+          Окно склейки событий, сек (в буре событий реплика одна — про главное)
+          <input
+            type="number"
+            min={0}
+            step={0.5}
+            value={settings.debounce_window_s}
             onChange={(e) =>
-              patch({ template_mode: e.target.value as SettingsDto["template_mode"] })
+              setSettings({ ...settings, debounce_window_s: Number(e.target.value) })
             }
-          >
-            <option value="seed">затравка для LLM (уникальные реплики)</option>
-            <option value="verbatim">сначала дословно, потом LLM</option>
-            <option value="off">только при сбое LLM</option>
-          </select>
+            onBlur={(e) => patch({ debounce_window_s: Number(e.target.value) })}
+          />
         </label>
         <label>
           Не озвучивать реплики старше, секунд (текст всё равно покажем)
@@ -257,6 +297,142 @@ export function Panel() {
           </p>
         )}
       </section>
+
+      {prompts && (
+        <section>
+          <h2>Промпты</h2>
+
+          <label className="check">
+            Персона
+            <select
+              value={settings.active_persona_id}
+              onChange={(e) => patch({ active_persona_id: Number(e.target.value) })}
+            >
+              {prompts.personas.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+          <textarea
+            className="prompt"
+            value={personaDraft}
+            onChange={(e) => setPersonaDraft(e.target.value)}
+            onBlur={() =>
+              activePersona &&
+              savePrompt(api.updatePersona(activePersona.id, { text: personaDraft }))
+            }
+          />
+          <div className="row">
+            <input
+              placeholder="имя нового пресета"
+              value={newPersonaName}
+              onChange={(e) => setNewPersonaName(e.target.value)}
+            />
+            <button
+              onClick={() =>
+                newPersonaName.trim() &&
+                api
+                  .createPersona(newPersonaName.trim(), personaDraft)
+                  .then(() => {
+                    setNewPersonaName("");
+                    reloadPrompts();
+                  })
+                  .catch((e) => setMessage(String(e)))
+              }
+            >
+              Сохранить как новый пресет
+            </button>
+            {activePersona?.is_builtin ? (
+              <button onClick={() => savePrompt(api.resetPersona(activePersona.id))}>
+                Сбросить к заводскому
+              </button>
+            ) : (
+              activePersona && (
+                <button
+                  className="danger"
+                  onClick={() =>
+                    savePrompt(
+                      api.deletePersona(activePersona.id).then(() => {
+                        // Удалили активную — сервер переключил её на встроенную.
+                        api.getSettings().then(setSettings).catch(() => {});
+                      }),
+                    )
+                  }
+                >
+                  Удалить пресет
+                </button>
+              )
+            )}
+          </div>
+
+          <p className="hint">Формат ответа — длина, синтаксис, запрет на самоповторы:</p>
+          <textarea
+            className="prompt"
+            value={formatDraft}
+            onChange={(e) => setFormatDraft(e.target.value)}
+            onBlur={() => savePrompt(api.putResponseFormat(formatDraft))}
+          />
+          <button
+            onClick={() =>
+              savePrompt(api.resetResponseFormat().then((r) => setFormatDraft(r.text)))
+            }
+          >
+            Сбросить формат к заводскому
+          </button>
+
+          <div className="row">
+            {(["wot", "lol"] as const).map((g) => (
+              <button key={g} className={game === g ? "" : "ghost"} onClick={() => setGame(g)}>
+                {g === "wot" ? "Мир танков" : "League of Legends"}
+              </button>
+            ))}
+          </div>
+          <p className="hint">База игры (сленг, мишени, табу):</p>
+          <textarea
+            className="prompt"
+            value={baseDraft}
+            onChange={(e) => setBaseDraft(e.target.value)}
+            onBlur={() => savePrompt(api.putGameBase(game, baseDraft))}
+          />
+          <button
+            onClick={() =>
+              savePrompt(api.resetGameBase(game).then((r) => setBaseDraft(r.text)))
+            }
+          >
+            Сбросить базу к заводской
+          </button>
+
+          <p className="hint">
+            Бриф под технику/чемпиона
+            {prompts.games[game]?.subject && ` — ${prompts.games[game].subject}`}
+            {prompts.games[game]?.generated_at &&
+              ` · сгенерирован ${prompts.games[game].generated_at.slice(11, 16)}`}
+            {prompts.games[game]?.error && ` · ошибка: ${prompts.games[game].error}`}
+          </p>
+          <textarea
+            className="prompt"
+            value={briefDraft}
+            placeholder="бриф появится на старте боя"
+            onChange={(e) => setBriefDraft(e.target.value)}
+            onBlur={() => savePrompt(api.putGameBrief(game, briefDraft))}
+          />
+          <button
+            onClick={() => {
+              setMessage("Генерирую бриф…");
+              api
+                .regenerateBrief(game)
+                .then((r) => {
+                  setBriefDraft(r.brief);
+                  setMessage("Бриф обновлён");
+                  reloadPrompts();
+                })
+                .catch((e) => setMessage(String(e)));
+            }}
+          >
+            Перегенерировать бриф
+          </button>
+        </section>
+      )}
 
       <section>
         <h2>Голос</h2>

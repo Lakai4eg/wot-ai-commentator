@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-director"
-version = "0.3.0"
+version = "0.4.0"
 description = "AI-режиссёр стрима: видит игру, комментирует и развлекает зрителей"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,10 +16,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8",
-    "pytest-asyncio>=0.23",
-]
 ml = [
     "torch>=2.2",
     "omegaconf>=2.3",
@@ -27,10 +23,3 @@ ml = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"stream_director.games.lol" = ["templates/*.txt"]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]

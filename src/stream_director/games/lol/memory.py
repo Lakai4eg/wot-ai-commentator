@@ -15,10 +15,11 @@ class LolBattleMemory:
     """Счётчики текущей игры; сбрасываются на battle_start."""
 
     def __init__(self, map_name: str | None = None, mode: str | None = None,
-                 champion: str | None = None) -> None:
+                 champion: str | None = None, position: str | None = None) -> None:
         self.map = map_name
         self.mode = mode
         self.champion = champion
+        self.position = position
         self.kills = 0
         self.deaths = 0
         self.assists = 0
@@ -89,7 +90,8 @@ class LolSessionMemory:
 
         if t == "battle_start":
             self.battle = LolBattleMemory(
-                map_name=p.get("map"), mode=p.get("mode"), champion=p.get("champion")
+                map_name=p.get("map"), mode=p.get("mode"), champion=p.get("champion"),
+                position=p.get("position"),
             )
         elif t == "frag":
             self.kills += 1
@@ -145,6 +147,17 @@ class LolSessionMemory:
             if p.get("outcome") == "win":
                 self.wins += 1
         return facts
+
+    _POSITION_RU = {"TOP": "топ", "JUNGLE": "лес", "MIDDLE": "мид",
+                    "BOTTOM": "адк", "UTILITY": "саппорт"}
+
+    def brief_subject(self) -> str | None:
+        """Тема брифа: «Yasuo, мид». Чемпион неизвестен — None."""
+        champion = self.battle.champion
+        if not champion:
+            return None
+        role = self._POSITION_RU.get(self.battle.position or "")
+        return f"{champion}, {role}" if role else champion
 
     def battle_lines(self) -> list[str]:
         """Контекст текущей игры — основа каждой реплики."""

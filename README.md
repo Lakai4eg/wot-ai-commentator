@@ -48,7 +48,7 @@ Ollama Cloud (`https://ollama.com/v1`), локальный Ollama
 ## Чат-команды
 
 Единственная команда — `!dir <текст>`: заказ реплики режиссёру. Заказ
-отрабатывает всегда: глобальный кулдаун и дебаунс игровых событий его
+отрабатывает всегда: глобальный кулдаун и окно склейки игровых событий его
 не задерживают (только пер-зрительский антиспам-кулдаун).
 
 По умолчанию команда доступна никам из белого списка (роли `director`/`admin`
@@ -61,7 +61,7 @@ Ollama Cloud (`https://ollama.com/v1`), локальный Ollama
 
 1. Python 3.12+ и Node.js 18+ (Windows: `winget install Python.Python.3.12 OpenJS.NodeJS.LTS`,
    в установщике Python — галочка «Add python.exe to PATH»).
-2. `python -m pip install -e .[dev,ml]` (ml = голос: torch + Silero)
+2. `python -m pip install -e .[ml]` (ml = голос: torch + Silero)
    и `cd web && npm install && npm run build && cd ..`.
 3. Запуск: `python -m stream_director`, панель — http://127.0.0.1:8710/panel.
 
@@ -70,14 +70,23 @@ Ollama Cloud (`https://ollama.com/v1`), локальный Ollama
 на тег `v*` (`.github/workflows/release.yml`).
 
 ```bash
-python -m pytest            # тесты ядра
 cd web && npm run dev       # фронтенд с hot-reload (proxy на :8710)
 ```
 
 Архитектура: `games/<игра>/client.py` (транспорт: WoT — WebSocket мода,
 LoL — поллер Live Client API) → `games/<игра>/mapper.py` (события → стимулы)
-→ `director.py` (очередь, кулдаун, LLM; игро-независим) → `broadcast.py`
-(WS-оверлей + озвучка Silero). Игро-специфичное (память, промпт-колорит,
-фолбэки) — в `games/<игра>/`, контракт модуля — `games/base.py`.
+→ `director.py` (очередь, окно склейки, кулдаун, LLM; игро-независим) →
+`broadcast.py` (WS-оверлей + озвучка Silero). Игро-специфичное (память,
+`build_event`: стимул → факты для LLM) — в `games/<игра>/`, контракт модуля —
+`games/base.py`.
+
+Промпт комментатора = персона + формат ответа + игровой промпт + контекст боя +
+событие. Заводские тексты — в `commentary/defaults.py`, правки из панели и
+пресеты персон — в `db/prompts.py` (таблицы `personas`, `prompts`, `game_briefs`
+в том же SQLite). Вторую половину игрового промпта — бриф под конкретный
+танк/чемпиона — на старте боя пишет сама LLM (`commentary/brief.py`), править и
+перегенерировать его можно в секции «Промпты» панели. Шаблонов реплик в проекте
+нет: если LLM недоступна, комментатор молчит, а ошибка видна в бейдже `LLM`.
+
 Рабочие данные (настройки, `chat-users.db`, журналы LoL) — в `data/`.
 Спеки — в `docs/superpowers/specs/`.

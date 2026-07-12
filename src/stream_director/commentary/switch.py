@@ -55,8 +55,9 @@ class SwitchBackend:
         if "openai_model" in data:
             self.openai.model = data["openai_model"]
 
-    async def generate(self, prompt: str) -> str | None:
-        return await self.active.generate(prompt)
+    async def generate(self, prompt: str, *, max_tokens: int = 80,
+                       timeout_s: float | None = None) -> str | None:
+        return await self.active.generate(prompt, max_tokens=max_tokens, timeout_s=timeout_s)
 
     async def close(self) -> None:
         await self.gemini.close()

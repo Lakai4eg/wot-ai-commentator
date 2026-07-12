@@ -24,21 +24,26 @@ class GeminiBackend:
             self._client = httpx.AsyncClient(timeout=self.timeout_s)
         return self._client
 
-    async def generate(self, prompt: str) -> str | None:
+    async def generate(self, prompt: str, *, max_tokens: int = 80,
+                       timeout_s: float | None = None) -> str | None:
         if not self.api_key:
             self.last_error = "API-ключ Gemini не задан"
             return None
         url = f"{_BASE_URL}/{self.model}:generateContent"
+        timeout = timeout_s or self.timeout_s
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 80, "thinkingConfig": {"thinkingBudget": 0}},
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
         }
         try:
             resp = await self._get_client().post(
                 url,
                 json=payload,
                 headers={"x-goog-api-key": self.api_key},
-                timeout=self.timeout_s,
+                timeout=timeout,
             )
             if resp.status_code != 200:
                 self.last_error = f"HTTP {resp.status_code}"
