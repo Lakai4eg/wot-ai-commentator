@@ -57,11 +57,12 @@ def main() -> int:
                     print(f"FAIL: версия {status.get('app_version')!r} != {args.version!r}")
                     return 1
                 tts = status.get("tts_status")
-                if tts == "ready":
-                    print("OK: сервер отвечает, версия верна, TTS готов")
+                if tts in ("ready", "no_gpu"):
+                    # no_gpu — норма для CI-раннера: сборка живая, голос требует NVIDIA.
+                    print(f"OK: сервер отвечает, версия верна, tts={tts}")
                     return 0
-                if tts == "unavailable":
-                    print("FAIL: TTS unavailable — torch/модель не работают в сборке")
+                if tts in ("error", "unavailable"):
+                    print(f"FAIL: tts_status={tts} — движок не работает в сборке")
                     return 1
             time.sleep(3)
         print("FAIL: таймаут ожидания tts_status=ready")

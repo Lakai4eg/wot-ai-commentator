@@ -53,6 +53,14 @@ export interface PromptsDto {
   games: Record<string, GamePromptsDto>;
 }
 
+export interface TtsState {
+  state:
+    | "checking" | "no_gpu" | "downloading_runtime" | "downloading_model"
+    | "starting" | "loading" | "ready" | "error";
+  progress?: { done_mb?: number; total_mb?: number; step?: string } | null;
+  error?: string | null;
+}
+
 export interface StatusDto {
   wotstat?: {
     status: "connected" | "waiting";
@@ -67,6 +75,7 @@ export interface StatusDto {
   chat?: string;
   tts?: boolean;
   tts_status?: string;
+  tts_state?: TtsState;
   llm_configured?: boolean;
   llm_last_error?: string | null;
   llm_provider?: string;
@@ -103,6 +112,19 @@ export const api = {
       method: "POST",
     }),
   getVoices: () => req<{ voices: string[] }>("/api/voices"),
+  uploadVoice: (name: string, transcript: string, file: File) => {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("transcript", transcript);
+    form.append("file", file);
+    // Без Content-Type: браузер сам ставит boundary для multipart.
+    return fetch("/api/voices", { method: "POST", body: form }).then(async (r) => {
+      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    });
+  },
+  deleteVoice: (name: string) =>
+    req(`/api/voices/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  ttsRetry: () => req("/api/tts/retry", { method: "POST" }),
   getPrompts: () => req<PromptsDto>("/api/prompts"),
   createPersona: (name: string, text: string) =>
     req<{ id: number }>("/api/personas", { method: "POST", body: JSON.stringify({ name, text }) }),

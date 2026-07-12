@@ -1,11 +1,48 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ChatUser, PromptsDto, SettingsDto, StatusDto } from "../shared/api";
+import { api, ChatUser, PromptsDto, SettingsDto, StatusDto, TtsState } from "../shared/api";
 
 function Badge({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
   return (
     <span className={`badge ${ok ? "badge-ok" : "badge-bad"}`} title={detail}>
       {label}
     </span>
+  );
+}
+
+const TTS_STATE_TEXT: Record<string, string> = {
+  checking: "Проверяю видеокарту…",
+  downloading_runtime: "Скачиваю голосовой движок",
+  downloading_model: "Скачиваю голосовую модель",
+  starting: "Запускаю голосовой движок…",
+  loading: "Разворачиваю модель в память видеокарты…",
+};
+
+function TtsLoader({ st, onRetry }: { st: TtsState; onRetry: () => void }) {
+  if (st.state === "ready") return null;
+  const pct =
+    st.progress?.total_mb && st.progress?.done_mb !== undefined
+      ? Math.round((st.progress.done_mb / st.progress.total_mb) * 100)
+      : null;
+  return (
+    <div className={`tts-loader ${st.state === "error" || st.state === "no_gpu" ? "tts-loader-bad" : ""}`}>
+      {st.state === "error" || st.state === "no_gpu" ? (
+        <>
+          <span>{st.error ?? "голос недоступен"}</span>
+          <button onClick={onRetry}>повторить</button>
+        </>
+      ) : (
+        <>
+          <span>
+            {TTS_STATE_TEXT[st.state] ?? st.state}
+            {st.progress?.step && `: ${st.progress.step}`}
+            {pct !== null && ` — ${st.progress!.done_mb} / ${st.progress!.total_mb} МБ`}
+          </span>
+          {pct !== null && (
+            <div className="tts-progress"><div style={{ width: `${pct}%` }} /></div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -19,6 +56,9 @@ export function Panel() {
   const [message, setMessage] = useState("");
   const [voices, setVoices] = useState<string[]>([]);
   const [newOverrideType, setNewOverrideType] = useState("");
+  const [newVoiceName, setNewVoiceName] = useState("");
+  const [newVoiceText, setNewVoiceText] = useState("");
+  const [newVoiceFile, setNewVoiceFile] = useState<File | null>(null);
   const [prompts, setPrompts] = useState<PromptsDto | null>(null);
   const [personaDraft, setPersonaDraft] = useState("");
   const [formatDraft, setFormatDraft] = useState("");
@@ -144,6 +184,14 @@ export function Panel() {
         </span>
       </h1>
       {message && <div className="message">{message}</div>}
+      {status.tts_state && (
+        <TtsLoader
+          st={status.tts_state}
+          onRetry={() =>
+            api.ttsRetry().then(() => setMessage("Перезапускаю голос…")).catch((e) => setMessage(String(e)))
+          }
+        />
+      )}
       {status.update_available && (
         <div className="message">
           Доступна версия {status.update_available.version} —{" "}
@@ -523,6 +571,42 @@ export function Panel() {
           >
             добавить оверрайд
           </button>
+        </div>
+
+        <p className="hint">
+          Свой голос: WAV 5–12 секунд чистой речи + её текст. «default» — голос модели.
+        </p>
+        <div className="row">
+          <input placeholder="имя голоса" value={newVoiceName}
+                 onChange={(e) => setNewVoiceName(e.target.value)} />
+          <input type="file" accept=".wav" onChange={(e) => setNewVoiceFile(e.target.files?.[0] ?? null)} />
+        </div>
+        <textarea className="prompt" placeholder="текст, произнесённый в записи"
+                  value={newVoiceText} onChange={(e) => setNewVoiceText(e.target.value)} />
+        <div className="row">
+          <button
+            onClick={() => {
+              if (!newVoiceName.trim() || !newVoiceFile || !newVoiceText.trim()) return;
+              api.uploadVoice(newVoiceName.trim(), newVoiceText, newVoiceFile)
+                .then(() => {
+                  setNewVoiceName(""); setNewVoiceText(""); setNewVoiceFile(null);
+                  setMessage("Голос сохранён");
+                  api.getVoices().then((v) => setVoices(v.voices)).catch(() => {});
+                })
+                .catch((e) => setMessage(String(e)));
+            }}
+          >
+            Добавить голос
+          </button>
+          {voices.filter((v) => v !== "default").map((v) => (
+            <button key={v} className="danger"
+              onClick={() =>
+                api.deleteVoice(v).then(() => api.getVoices().then((r) => setVoices(r.voices))).catch((e) => setMessage(String(e)))
+              }
+            >
+              удалить «{v}»
+            </button>
+          ))}
         </div>
       </section>
 

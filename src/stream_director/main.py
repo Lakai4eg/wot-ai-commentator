@@ -26,7 +26,7 @@ from .games.base import ActiveGameTracker
 from .games.lol.module import build_module as build_lol_module
 from .games.wot.module import build_module as build_wot_module
 from .server import AppContext, create_app
-from .tts import SileroTTS
+from .tts import S1MiniTTS
 from .update_check import apply_update_status
 
 log = logging.getLogger(__name__)
@@ -134,14 +134,15 @@ async def run() -> None:
                            on_live=lambda: tracker.mark_live("lol"))
     director.register(lol)
 
-    # TTS: загрузка модели в фоне, не блокируя старт
-    def load_tts() -> None:
-        tts = SileroTTS(voice=settings.default_voice)
-        broadcaster.tts = tts
-        ctx.statuses["tts_status"] = "ready" if tts.available else "unavailable"
+    # Голос: bootstrap (GPU-проверка, докачки) и запуск worker-а — в фоне,
+    # сервер и текстовые реплики доступны сразу.
+    def set_tts_status(st: dict) -> None:
+        ctx.statuses["tts_state"] = st
+        ctx.statuses["tts_status"] = st["state"]
 
-    asyncio.get_running_loop().run_in_executor(None, load_tts)
-    ctx.statuses["tts_status"] = "loading"
+    tts = S1MiniTTS(on_status=set_tts_status)
+    broadcaster.tts = tts
+    asyncio.get_running_loop().run_in_executor(None, tts.start)
 
     # Диагностика источников/чата/LLM — вызывается на каждый GET /api/status.
     def refresh_statuses() -> None:
@@ -194,6 +195,7 @@ async def run() -> None:
     try:
         await server.serve()
     finally:
+        tts.stop()
         director.stop()
         chat.stop()
         wot.source.stop()

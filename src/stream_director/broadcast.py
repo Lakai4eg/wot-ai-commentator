@@ -12,7 +12,7 @@ from fastapi import WebSocket
 
 from .config import Settings
 from .stimulus import Stimulus
-from .tts import AudioStore, SileroTTS, pick_voice
+from .tts import AudioStore, S1MiniTTS, pick_voice, strip_markers
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class OverlayBroadcaster:
 
     settings: Settings
     audio: AudioStore = field(default_factory=AudioStore)
-    tts: SileroTTS | None = None
+    tts: S1MiniTTS | None = None
     replica_counter: int = 0
     ws_clients: set[WebSocket] = field(default_factory=set)
     # Ссылки на фоновые задачи озвучки: без них asyncio может собрать задачу GC.
@@ -39,7 +39,8 @@ class OverlayBroadcaster:
         message: dict[str, Any] = {
             "type": "replica",
             "id": replica_id,
-            "text": text if self.settings.text_enabled else "",
+            # Зрителю — текст без эмо-маркеров; в синтез уходит оригинал.
+            "text": strip_markers(text) if self.settings.text_enabled else "",
             "effect": stimulus.type,
         }
         voice_on = (

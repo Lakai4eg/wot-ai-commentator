@@ -10,7 +10,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,7 +33,7 @@ from .config import Settings, save_settings
 from .db import ROLES, ChatUserDB, PromptStore
 from .director import Director
 from .games.base import ActiveGameTracker
-from .tts import VOICES
+from .tts import DEFAULT_VOICE, delete_voice, list_voices, save_voice
 
 log = logging.getLogger(__name__)
 
@@ -296,8 +304,39 @@ def create_app(ctx: AppContext) -> FastAPI:
         return Response(content=wav, media_type="audio/wav")
 
     @app.get("/api/voices")
-    async def list_voices():
-        return {"voices": list(VOICES)}
+    async def get_voices():
+        return {"voices": list_voices()}
+
+    @app.post("/api/voices", status_code=201)
+    async def add_voice(
+        name: str = Form(...), transcript: str = Form(...), file: UploadFile = File(...)
+    ):
+        data = await file.read()
+        if len(data) > 15 * 2**20:
+            raise HTTPException(400, "референс больше 15 МБ")
+        if not data.startswith(b"RIFF"):
+            raise HTTPException(400, "нужен WAV-файл (5–12 секунд чистой речи)")
+        try:
+            save_voice(name, data, transcript)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True}
+
+    @app.delete("/api/voices/{name}")
+    async def remove_voice(name: str):
+        if name == DEFAULT_VOICE:
+            raise HTTPException(400, "встроенный голос не удаляется")
+        if not delete_voice(name):
+            raise HTTPException(404, "голос не найден")
+        return {"ok": True}
+
+    @app.post("/api/tts/retry", status_code=202)
+    async def tts_retry():
+        tts = ctx.broadcaster.tts
+        if tts is None:
+            raise HTTPException(503, "голос не инициализирован")
+        asyncio.get_running_loop().run_in_executor(None, tts.start)
+        return {"ok": True}
 
     @app.post("/api/tts/preview")
     async def preview_voice(body: PreviewIn):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stream-director"
-version = "0.4.0"
+version = "0.5.0"
 description = "AI-режиссёр стрима: видит игру, комментирует и развлекает зрителей"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,12 +13,7 @@ dependencies = [
     "httpx>=0.27",
     "websockets>=12",
     "numpy>=1.26",
-]
-
-[project.optional-dependencies]
-ml = [
-    "torch>=2.2",
-    "omegaconf>=2.3",
+    "python-multipart>=0.0.9",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,8 +1,9 @@
 """Сборка portable-дистрибутива Windows: «скачал → распаковал → работает».
 
-Всё в комплекте: embedded CPython + зависимости (CPU-torch), исходники
-проекта, собранный фронтенд, модель Silero, лаунчер. Спека:
-docs/superpowers/specs/2026-07-11-portable-windows-build-design.md.
+Всё в комплекте: embedded CPython + зависимости приложения (без torch),
+исходники проекта, собранный фронтенд, лаунчер. Голосовой стек (gpu-runtime
+и веса S1-mini) в билд не кладётся — приложение докачивает его при первом
+старте. Спека: docs/superpowers/specs/2026-07-11-portable-windows-build-design.md.
 
 Запуск из корня репо на Windows (Python 3.12+, Node 18+, MSVC cl.exe):
     python scripts/build_portable.py [--skip-launcher]
@@ -30,8 +31,6 @@ PYTHON_EMBED_URL = (
     "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
 )
 PYTHON_EMBED_SHA256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
-SILERO_MODEL_URL = "https://models.silero.ai/models/tts/ru/v4_ru.pt"
-SILERO_MODEL_SHA256 = "896ab96347d5bd781ab97959d4fd6885620e5aab52405d3445626eb7c1414b00"
 
 # ._pth управляет sys.path embedded-питона; PYTHONPATH при нём игнорируется,
 # поэтому путь к исходникам приложения прописан здесь, а не в лаунчере.
@@ -74,9 +73,14 @@ def build_python() -> None:
     # Зависимости ставим питоном сборочной машины: та же ОС/арх — колёса
     # совместимы. На Windows колёса torch с PyPI — CPU-only, CUDA не приедет.
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--target", str(site), ".[ml]"],
+        [sys.executable, "-m", "pip", "install", "--target", str(site), "."],
         check=True,
         cwd=ROOT,
+    )
+    # pip нужен bootstrap-у для установки gpu-runtime на машине пользователя.
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--target", str(site), "pip"],
+        check=True,
     )
     # Сам проект едет исходниками в app/src — из site-packages его убираем,
     # чтобы не было двух копий кода.
@@ -99,13 +103,6 @@ def copy_app() -> None:
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copytree(ROOT / "web" / "dist", STAGE / "app" / "web" / "dist")
-
-
-def fetch_model() -> None:
-    print("== модель Silero")
-    archive = download(SILERO_MODEL_URL, CACHE / "silero_v4_ru.pt", SILERO_MODEL_SHA256)
-    (STAGE / "models").mkdir()
-    shutil.copy2(archive, STAGE / "models" / "silero_v4_ru.pt")
 
 
 def build_launcher() -> None:
@@ -146,7 +143,6 @@ def main() -> None:
     build_python()
     build_web()
     copy_app()
-    fetch_model()
     if not args.skip_launcher:
         build_launcher()
     out = make_zip(version)

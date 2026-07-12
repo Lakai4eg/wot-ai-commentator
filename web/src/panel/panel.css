@@ -101,3 +101,13 @@ th { color: #8a8a95; font-weight: 500; }
   margin-bottom: 12px;
   font-size: 14px;
 }
+
+.tts-loader {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 14px; margin-bottom: 12px; border-radius: 6px;
+  background: rgba(96, 165, 250, 0.12); font-size: 14px;
+}
+.tts-loader-bad { background: rgba(248, 113, 113, 0.12); }
+.tts-loader-bad button { align-self: flex-start; }
+.tts-progress { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.tts-progress > div { height: 100%; background: #60a5fa; transition: width 0.4s; }

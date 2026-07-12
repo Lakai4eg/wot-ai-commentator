@@ -46,9 +46,10 @@ class Settings:
     # звучит нелепо). Текст оверлея это не трогает.
     tts_max_age_s: float = 20.0
     # Озвучка: голос по умолчанию + правила «контекст → голос».
+    # Имена голосов — референсы из data/voices/; "default" — собственный тембр модели.
     # voice_by_priority: "low"/"normal"/"high"/"critical" → голос.
     # voice_overrides: точный stimulus.type → голос (важнее правила по приоритету).
-    default_voice: str = "baya"
+    default_voice: str = "default"
     voice_by_priority: dict[str, str] = field(default_factory=dict)
     voice_overrides: dict[str, str] = field(default_factory=dict)
 
