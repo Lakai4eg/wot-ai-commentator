@@ -1,8 +1,9 @@
 """Голосовой worker: отдельный процесс, держит Chatterbox в VRAM.
 
 Запускается client.py. Ничего не импортирует из stream_director: только
-stdlib и gpu-runtime (путь приходит аргументом). Умирает по EOF stdin —
-так осиротевший процесс не удержит видеопамять, даже если родителя убили.
+stdlib и gpu-runtime (путь приходит аргументом). Умирает вместе с родителем
+(см. watch_parent) — так осиротевший процесс не удержит видеопамять, даже
+если родителя убили.
 """
 
 from __future__ import annotations
@@ -27,8 +28,25 @@ ARGS = None
 _PLUS_RE = re.compile(r"\+(.)")
 
 
-def watch_parent_stdin() -> None:
-    sys.stdin.buffer.read()  # блокируется до смерти родителя
+def watch_parent() -> None:
+    """Умереть вместе с родителем: осиротевший worker не должен держать VRAM.
+
+    На Windows ждём хэндл родителя, а не EOF stdin. Блокирующее чтение stdin
+    держит критическую секцию ucrt для fd 0 всё время ожидания, а инициализация
+    нативных модулей (numpy, torch) внутри LoadLibrary берёт эту же секцию под
+    loader lock — импорт движка вставал намертво, и голос не поднимался.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        SYNCHRONIZE, INFINITE = 0x00100000, 0xFFFFFFFF
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(SYNCHRONIZE, False, os.getppid())
+        if not handle:  # без хэндла остаёмся под terminate() от клиента
+            return
+        k32.WaitForSingleObject(handle, INFINITE)
+    else:
+        sys.stdin.buffer.read()  # блокируется до смерти родителя
     os._exit(0)
 
 
@@ -144,7 +162,7 @@ def main() -> None:
 
     # gpu-runtime первым в sys.path: его пины важнее site-packages приложения.
     sys.path.insert(0, str(Path(ARGS.runtime).resolve()))
-    threading.Thread(target=watch_parent_stdin, daemon=True).start()
+    threading.Thread(target=watch_parent, daemon=True).start()
 
     # health отвечает «loading» уже во время разворота модели в VRAM.
     server = ThreadingHTTPServer(("127.0.0.1", ARGS.port), Handler)

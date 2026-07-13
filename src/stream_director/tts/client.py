@@ -83,7 +83,7 @@ class ChatterboxTTS:
             [sys.executable, str(WORKER_PATH),
              "--runtime", str(RUNTIME_DIR), "--model-dir", str(MODEL_DIR),
              "--voices-dir", str(VOICES_DIR), "--port", str(self._port)],
-            stdin=subprocess.PIPE,  # worker умирает по EOF — страховка от сирот
+            stdin=subprocess.PIPE,  # EOF по смерти родителя — страховка от сирот на POSIX
             creationflags=CREATE_NO_WINDOW, env=env,
         )
         deadline = time.monotonic() + READY_TIMEOUT_S

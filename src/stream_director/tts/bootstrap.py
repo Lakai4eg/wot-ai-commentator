@@ -97,6 +97,10 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _unpack_dir(zip_name: str) -> Path:
+    return MODEL_DIR / zip_name.removesuffix(".zip").split("-")[0]
+
+
 def ensure_weights(status: StatusCb) -> None:
     if any(not sha for sha, _ in WEIGHTS.values()):
         raise BootstrapError("зеркало весов не опубликовано (pins.py пуст) — соберите релиз моделей")
@@ -106,7 +110,11 @@ def ensure_weights(status: StatusCb) -> None:
     for name, (sha, size) in WEIGHTS.items():
         dest = MODEL_DIR / name
         ok_marker = MODEL_DIR / f"{name}.ok"
-        if dest.is_file() and ok_marker.is_file():
+        # Архив после распаковки не нужен — удаляем его и судим о готовности по
+        # маркерам: сам zip как признак «скачано» заставил бы качать сотни
+        # мегабайт заново при каждом старте.
+        unpacked = name.endswith(".zip") and (_unpack_dir(name) / ".unpacked").is_file()
+        if ok_marker.is_file() and (unpacked or dest.is_file()):
             done += size
             continue
         _download(f"{WEIGHTS_BASE_URL}/{name}", dest, done, total_mb, status)
@@ -115,12 +123,11 @@ def ensure_weights(status: StatusCb) -> None:
             raise BootstrapError(f"SHA256 не совпал для {name} — файл повреждён, перезапустите")
         ok_marker.write_text("ok")
         if name.endswith(".zip"):
-            unpack_dir = MODEL_DIR / name.removesuffix(".zip").split("-")[0]
-            if not (unpack_dir / ".unpacked").is_file():
-                import zipfile
-                with zipfile.ZipFile(dest) as z:
-                    z.extractall(unpack_dir)
-                (unpack_dir / ".unpacked").write_text("ok")
+            import zipfile
+            with zipfile.ZipFile(dest) as z:
+                z.extractall(_unpack_dir(name))
+            (_unpack_dir(name) / ".unpacked").write_text("ok")
+            dest.unlink()
         done += size
 
 
