@@ -12,7 +12,7 @@ from fastapi import WebSocket
 
 from .config import Settings
 from .stimulus import Stimulus
-from .tts import AudioStore, S1MiniTTS, pick_voice, strip_markers
+from .tts import AudioStore, ChatterboxTTS, parse, pick_voice
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class OverlayBroadcaster:
 
     settings: Settings
     audio: AudioStore = field(default_factory=AudioStore)
-    tts: S1MiniTTS | None = None
+    tts: ChatterboxTTS | None = None
     replica_counter: int = 0
     ws_clients: set[WebSocket] = field(default_factory=set)
     # Ссылки на фоновые задачи озвучки: без них asyncio может собрать задачу GC.
@@ -36,11 +36,12 @@ class OverlayBroadcaster:
     async def publish(self, text: str, stimulus: Stimulus) -> None:
         self.replica_counter += 1
         replica_id = self.replica_counter
+        marker, clean = parse(text)
         message: dict[str, Any] = {
             "type": "replica",
             "id": replica_id,
             # Зрителю — текст без эмо-маркеров; в синтез уходит оригинал.
-            "text": strip_markers(text) if self.settings.text_enabled else "",
+            "text": clean if self.settings.text_enabled else "",
             "effect": stimulus.type,
         }
         voice_on = (
@@ -50,7 +51,7 @@ class OverlayBroadcaster:
             and self.tts.available
         )
         if voice_on:
-            voice = pick_voice(self.settings, stimulus.type, stimulus.priority)
+            voice = pick_voice(self.settings, stimulus.type, stimulus.priority, marker)
             task = asyncio.get_running_loop().create_task(
                 self._send_audio(replica_id, text, voice)
             )

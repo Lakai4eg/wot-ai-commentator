@@ -55,9 +55,9 @@ export function Panel() {
   const [newRole, setNewRole] = useState<"director" | "admin" | "banned">("director");
   const [message, setMessage] = useState("");
   const [voices, setVoices] = useState<string[]>([]);
+  const [markers, setMarkers] = useState<string[]>([]);
   const [newOverrideType, setNewOverrideType] = useState("");
   const [newVoiceName, setNewVoiceName] = useState("");
-  const [newVoiceText, setNewVoiceText] = useState("");
   const [newVoiceFile, setNewVoiceFile] = useState<File | null>(null);
   const [prompts, setPrompts] = useState<PromptsDto | null>(null);
   const [personaDraft, setPersonaDraft] = useState("");
@@ -93,7 +93,7 @@ export function Panel() {
     api.getSettings().then(setSettings).catch(() => setMessage("Сервер недоступен"));
     refreshUsers();
     reloadPrompts();
-    api.getVoices().then((v) => setVoices(v.voices)).catch(() => {});
+    api.getVoices().then((v) => { setVoices(v.voices); setMarkers(v.markers); }).catch(() => {});
     const t = setInterval(() => api.getStatus().then(setStatus).catch(() => {}), 2000);
     return () => clearInterval(t);
   }, [refreshUsers, reloadPrompts]);
@@ -574,22 +574,48 @@ export function Panel() {
         </div>
 
         <p className="hint">
-          Свой голос: WAV 5–12 секунд чистой речи + её текст. «default» — голос модели.
+          Голос по эмоции (маркер в реплике важнее всех правил выше; пусто — действуют они):
+        </p>
+        {markers.map((m) => (
+          <label key={m} className="check">
+            ({m})
+            <div className="row">
+              <select
+                value={settings.voice_by_marker[m] ?? ""}
+                onChange={(e) => {
+                  const next = { ...settings.voice_by_marker };
+                  if (e.target.value) next[m] = e.target.value;
+                  else delete next[m];
+                  patch({ voice_by_marker: next });
+                }}
+              >
+                <option value="">— по умолчанию —</option>
+                {voices.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              {settings.voice_by_marker[m] && (
+                <button onClick={() => preview(settings.voice_by_marker[m])}>прослушать</button>
+              )}
+            </div>
+          </label>
+        ))}
+
+        <p className="hint">
+          Свой голос: WAV ~10 секунд чистой речи, текст не нужен. «default» — голос модели.
         </p>
         <div className="row">
           <input placeholder="имя голоса" value={newVoiceName}
                  onChange={(e) => setNewVoiceName(e.target.value)} />
           <input type="file" accept=".wav" onChange={(e) => setNewVoiceFile(e.target.files?.[0] ?? null)} />
         </div>
-        <textarea className="prompt" placeholder="текст, произнесённый в записи"
-                  value={newVoiceText} onChange={(e) => setNewVoiceText(e.target.value)} />
         <div className="row">
           <button
             onClick={() => {
-              if (!newVoiceName.trim() || !newVoiceFile || !newVoiceText.trim()) return;
-              api.uploadVoice(newVoiceName.trim(), newVoiceText, newVoiceFile)
+              if (!newVoiceName.trim() || !newVoiceFile) return;
+              api.uploadVoice(newVoiceName.trim(), newVoiceFile)
                 .then(() => {
-                  setNewVoiceName(""); setNewVoiceText(""); setNewVoiceFile(null);
+                  setNewVoiceName(""); setNewVoiceFile(null);
                   setMessage("Голос сохранён");
                   api.getVoices().then((v) => setVoices(v.voices)).catch(() => {});
                 })

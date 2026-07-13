@@ -1,4 +1,4 @@
-"""Голосовой worker: отдельный процесс, держит S1-mini в VRAM.
+"""Голосовой worker: отдельный процесс, держит Chatterbox в VRAM.
 
 Запускается client.py. Ничего не импортирует из stream_director: только
 stdlib и gpu-runtime (путь приходит аргументом). Умирает по EOF stdin —
@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import shutil
 import sys
 import threading
 import wave
@@ -19,8 +21,10 @@ from pathlib import Path
 
 PHASE = {"value": "loading"}
 ENGINE = None
+ACCENT = None
 LOCK = threading.Lock()  # один синтез за раз: VRAM и очередь бережём
 ARGS = None
+_PLUS_RE = re.compile(r"\+(.)")
 
 
 def watch_parent_stdin() -> None:
@@ -29,61 +33,61 @@ def watch_parent_stdin() -> None:
 
 
 def load_engine():
-    import torch
-    from fish_speech.inference_engine import TTSInferenceEngine
-    from fish_speech.models.dac.inference import load_model as load_decoder_model
-    from fish_speech.models.text2semantic.inference import launch_thread_safe_queue
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-    precision = torch.bfloat16
-    llama_queue = launch_thread_safe_queue(
-        checkpoint_path=str(ARGS.model_dir), device="cuda",
-        precision=precision, compile=False,
-    )
-    decoder = load_decoder_model(
-        config_name="modded_dac_vq",
-        checkpoint_path=str(Path(ARGS.model_dir) / "codec.pth"), device="cuda",
-    )
-    return TTSInferenceEngine(
-        llama_queue=llama_queue, decoder_model=decoder,
-        precision=precision, compile=False,
-    )
+    return ChatterboxMultilingualTTS.from_local(ARGS.model_dir, device="cuda")
 
 
-def synth_wav(text: str, voice: str | None) -> bytes:
-    import numpy as np
-    from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
+def load_accentizer():
+    import ruaccent
+    from ruaccent import RUAccent
 
-    references = []
+    # RUAccent.load() безусловно докачивает с HF подпакет koziev
+    # (rupostagger+rulemma) в каталог САМОГО пакета, а не в workdir — оффлайн
+    # это краш (HF_HUB_OFFLINE=1) или зависание. Кладём koziev туда из зеркала:
+    # существующий каталог гасит докачку (проверка в ruaccent.load).
+    pkg_koziev = Path(ruaccent.__file__).parent / "koziev"
+    mirror_koziev = Path(ARGS.model_dir) / "ruaccent" / "koziev"
+    if not pkg_koziev.exists() and mirror_koziev.is_dir():
+        shutil.copytree(mirror_koziev, pkg_koziev)
+
+    acc = RUAccent()
+    acc.load(omograph_model_size="turbo", use_dictionary=True,
+             workdir=str(Path(ARGS.model_dir) / "ruaccent"))
+    return acc
+
+
+def accentize(text: str) -> str:
+    """RUAccent ставит '+' перед ударной гласной; движку нужен U+0301 после неё.
+
+    Ошибка аккцентизации не валит синтез: ударения — улучшение, не точка отказа.
+    """
+    try:
+        return _PLUS_RE.sub("\\1́", ACCENT.process_all(text))
+    except Exception:
+        return text
+
+
+def synth_wav(text: str, voice: str | None,
+              exaggeration: float, cfg_weight: float) -> bytes:
+    text = accentize(text)
+    ref: str | None = None
     if voice and voice != "default":
-        wav_p = Path(ARGS.voices_dir) / f"{voice}.wav"
-        txt_p = Path(ARGS.voices_dir) / f"{voice}.txt"
-        if wav_p.is_file() and txt_p.is_file():
-            references = [ServeReferenceAudio(
-                audio=wav_p.read_bytes(),
-                text=txt_p.read_text(encoding="utf-8"),
-            )]
-    request = ServeTTSRequest(
-        text=text, references=references, format="wav", streaming=False,
-        max_new_tokens=1024, chunk_length=300,
-        top_p=0.8, repetition_penalty=1.1, temperature=0.8,
-    )
-    sample_rate, parts = 44100, []
+        p = Path(ARGS.voices_dir) / f"{voice}.wav"
+        if p.is_file():
+            ref = str(p)
     with LOCK:
-        for result in ENGINE.inference(request):
-            if result.code == "error":
-                raise RuntimeError(str(result.error))
-            if result.audio is not None:
-                sample_rate, data = result.audio
-                parts.append(data)
-    if not parts:
-        raise RuntimeError("модель не вернула аудио")
-    audio = np.concatenate(parts)
-    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        wav = ENGINE.generate(
+            text, language_id="ru", audio_prompt_path=ref,
+            exaggeration=exaggeration, cfg_weight=cfg_weight,
+        )
+    data = wav.squeeze(0).clamp(-1.0, 1.0).cpu().numpy()
+    pcm = (data * 32767).astype("<i2").tobytes()
     buf = BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(int(sample_rate))
+        w.setframerate(int(ENGINE.sr))
         w.writeframes(pcm)
     return buf.getvalue()
 
@@ -117,7 +121,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             req = json.loads(self.rfile.read(length))
-            data = synth_wav(req["text"], req.get("voice"))
+            data = synth_wav(req["text"], req.get("voice"),
+                             float(req.get("exaggeration", 0.5)),
+                             float(req.get("cfg_weight", 0.5)))
         except Exception as e:  # любой сбой синтеза — это 500, а не смерть worker-а
             return self._json(500, {"error": str(e)})
         self.send_response(200)
@@ -128,7 +134,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    global ARGS, ENGINE
+    global ARGS, ENGINE, ACCENT
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", required=True)
     parser.add_argument("--model-dir", required=True)
@@ -145,6 +151,7 @@ def main() -> None:
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     ENGINE = load_engine()
+    ACCENT = load_accentizer()
     PHASE["value"] = "ready"
     threading.Event().wait()  # живём, пока не убьют / EOF stdin
 

@@ -52,6 +52,8 @@ class Settings:
     default_voice: str = "default"
     voice_by_priority: dict[str, str] = field(default_factory=dict)
     voice_overrides: dict[str, str] = field(default_factory=dict)
+    # voice_by_marker: эмо-маркер ("angry"…) → голос; сильнее всех прочих правил.
+    voice_by_marker: dict[str, str] = field(default_factory=dict)
 
 
 def load_settings(path: str | Path) -> Settings:

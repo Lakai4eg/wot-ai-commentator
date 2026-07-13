@@ -28,7 +28,7 @@ from .games.lol.module import build_module as build_lol_module
 from .games.wot.module import build_module as build_wot_module
 from .paths import DATA_DIR, DB_PATH, INSTALL, SETTINGS_PATH, migrate_state
 from .server import AppContext, create_app
-from .tts import S1MiniTTS
+from .tts import ChatterboxTTS
 from .update_check import apply_update_status
 
 log = logging.getLogger(__name__)
@@ -175,7 +175,7 @@ async def run() -> None:
         ctx.statuses["tts_state"] = st
         ctx.statuses["tts_status"] = st["state"]
 
-    tts = S1MiniTTS(on_status=set_tts_status)
+    tts = ChatterboxTTS(on_status=set_tts_status)
     broadcaster.tts = tts
     asyncio.get_running_loop().run_in_executor(None, tts.start)
 

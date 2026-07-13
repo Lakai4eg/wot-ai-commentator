@@ -33,7 +33,7 @@ from .config import Settings, save_settings
 from .db import ROLES, ChatUserDB, PromptStore
 from .director import Director
 from .games.base import ActiveGameTracker
-from .tts import DEFAULT_VOICE, delete_voice, list_voices, save_voice
+from .tts import DEFAULT_VOICE, EMOTION_MARKERS, delete_voice, list_voices, save_voice
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +84,7 @@ class SettingsIn(BaseModel):
     default_voice: str | None = None
     voice_by_priority: dict[str, str] | None = None
     voice_overrides: dict[str, str] | None = None
+    voice_by_marker: dict[str, str] | None = None
 
 
 class PreviewIn(BaseModel):
@@ -305,19 +306,17 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.get("/api/voices")
     async def get_voices():
-        return {"voices": list_voices()}
+        return {"voices": list_voices(), "markers": list(EMOTION_MARKERS)}
 
     @app.post("/api/voices", status_code=201)
-    async def add_voice(
-        name: str = Form(...), transcript: str = Form(...), file: UploadFile = File(...)
-    ):
+    async def add_voice(name: str = Form(...), file: UploadFile = File(...)):
         data = await file.read()
         if len(data) > 15 * 2**20:
             raise HTTPException(400, "референс больше 15 МБ")
         if not data.startswith(b"RIFF"):
-            raise HTTPException(400, "нужен WAV-файл (5–12 секунд чистой речи)")
+            raise HTTPException(400, "нужен WAV-файл (около 10 секунд чистой речи)")
         try:
-            save_voice(name, data, transcript)
+            save_voice(name, data)
         except ValueError as e:
             raise HTTPException(400, str(e))
         return {"ok": True}

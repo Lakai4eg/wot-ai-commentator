@@ -1,8 +1,9 @@
-"""Клиент голосового worker-а: жизненный цикл подпроцесса и HTTP-вызовы."""
+"""Клиент голосового worker-а Chatterbox: жизненный цикл подпроцесса и HTTP-вызовы."""
 
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -15,6 +16,7 @@ import httpx
 
 from . import bootstrap
 from .bootstrap import CREATE_NO_WINDOW, MODEL_DIR, RUNTIME_DIR, BootstrapError
+from .markers import DEFAULT_STYLE, MARKER_STYLE, parse
 from .voices import VOICES_DIR
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ SYNTH_TIMEOUT_S = 90.0
 MAX_RESTARTS = 3
 
 
-class S1MiniTTS:
+class ChatterboxTTS:
     """Голос приложения. Недоступен — реплики идут текстом, это штатно."""
 
     def __init__(self, on_status: Callable[[dict], None]):
@@ -74,12 +76,15 @@ class S1MiniTTS:
         with socket.socket() as s:  # свободный порт: без гонок в пределах локалхоста
             s.bind(("127.0.0.1", 0))
             self._port = s.getsockname()[1]
+        # RUAccent тянет данные с HF Hub, если workdir неполон; веса зеркалим
+        # сами (ruaccent-data.zip), поэтому запрещаем worker-у ходить в сеть.
+        env = {**os.environ, "HF_HUB_OFFLINE": "1"}
         self._proc = subprocess.Popen(
             [sys.executable, str(WORKER_PATH),
              "--runtime", str(RUNTIME_DIR), "--model-dir", str(MODEL_DIR),
              "--voices-dir", str(VOICES_DIR), "--port", str(self._port)],
             stdin=subprocess.PIPE,  # worker умирает по EOF — страховка от сирот
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW, env=env,
         )
         deadline = time.monotonic() + READY_TIMEOUT_S
         while time.monotonic() < deadline:
@@ -105,8 +110,15 @@ class S1MiniTTS:
     def synth(self, text: str, voice: str | None = None) -> bytes | None:
         if not self._ready:
             return None
+        # Маркер разбирается здесь, а не в broadcast: /api/tts/preview зовёт
+        # synth напрямую, и маркеры в превью должны работать так же, как в эфире.
+        marker, clean = parse(text)
+        exaggeration, cfg_weight = MARKER_STYLE.get(marker, DEFAULT_STYLE)
         try:
-            r = self._http.post(self._url("/synth"), json={"text": text, "voice": voice})
+            r = self._http.post(self._url("/synth"), json={
+                "text": clean, "voice": voice,
+                "exaggeration": exaggeration, "cfg_weight": cfg_weight,
+            })
             if r.status_code != 200:
                 log.warning("synth %s: %s", r.status_code, r.text[:200])
                 return None

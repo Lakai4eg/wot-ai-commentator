@@ -1,4 +1,4 @@
-"""Первый старт: проверка GPU, установка gpu-runtime, докачка весов S1-mini.
+"""Первый старт: проверка GPU, установка gpu-runtime, докачка весов Chatterbox.
 
 Всё синхронное — вызывается из потока executor, event loop не трогает.
 """
@@ -18,7 +18,7 @@ from typing import Callable
 import httpx
 
 from ..paths import MODEL_DIR, RUNTIME_DIR
-from .pins import RUNTIME_PACKAGES, TORCH_INDEX_URL, WEIGHTS, WEIGHTS_BASE_URL
+from .pins import NO_DEPS_PACKAGES, RUNTIME_PACKAGES, TORCH_INDEX_URL, WEIGHTS, WEIGHTS_BASE_URL
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def check_gpu() -> str | None:
 
 
 def _pins_fingerprint() -> str:
-    raw = json.dumps([TORCH_INDEX_URL, RUNTIME_PACKAGES], ensure_ascii=False)
+    raw = json.dumps([TORCH_INDEX_URL, RUNTIME_PACKAGES, NO_DEPS_PACKAGES], ensure_ascii=False)
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -62,14 +62,18 @@ def ensure_runtime(status: StatusCb) -> None:
     if RUNTIME_DIR.exists():
         shutil.rmtree(RUNTIME_DIR)
     status(_st("downloading_runtime", {"step": "подготовка…"}))
-    cmd = [
-        sys.executable, "-m", "pip", "install",
-        "--target", str(RUNTIME_DIR),
-        "--index-url", TORCH_INDEX_URL,
-        "--extra-index-url", "https://pypi.org/simple",
-        "--progress-bar", "off",
-        *RUNTIME_PACKAGES,
-    ]
+    _pip_install(RUNTIME_PACKAGES, extra=["--index-url", TORCH_INDEX_URL,
+                                          "--extra-index-url", "https://pypi.org/simple"],
+                 status=status)
+    # chatterbox-tts пинит gradio==6.8.0 и torch==2.6.0 — его зависимости
+    # уже стоят явным списком выше, сам пакет въезжает без них.
+    _pip_install(NO_DEPS_PACKAGES, extra=["--no-deps"], status=status)
+    marker.write_text(_pins_fingerprint())
+
+
+def _pip_install(packages: list[str], extra: list[str], status: StatusCb) -> None:
+    cmd = [sys.executable, "-m", "pip", "install",
+           "--target", str(RUNTIME_DIR), "--progress-bar", "off", *extra, *packages]
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         encoding="utf-8", errors="replace", creationflags=CREATE_NO_WINDOW,
@@ -83,12 +87,6 @@ def ensure_runtime(status: StatusCb) -> None:
             status(_st("downloading_runtime", {"step": m.group(2)}))
     if proc.wait() != 0:
         raise BootstrapError("pip не смог установить GPU-рантайм:\n" + "\n".join(tail[-8:]))
-    # fish_speech.models.dac.inference на импорте зовёт pyrootutils.setup_root
-    # с indicator=".project-root" — ищет этот файл вверх по дереву. pip его не
-    # ставит, без него импорт падает FileNotFoundError и worker не поднимается.
-    # Пустого файла в корне рантайма достаточно (см. spike-results.md).
-    (RUNTIME_DIR / ".project-root").touch()
-    marker.write_text(_pins_fingerprint())
 
 
 def _sha256(path: Path) -> str:
@@ -116,6 +114,13 @@ def ensure_weights(status: StatusCb) -> None:
             dest.unlink()
             raise BootstrapError(f"SHA256 не совпал для {name} — файл повреждён, перезапустите")
         ok_marker.write_text("ok")
+        if name.endswith(".zip"):
+            unpack_dir = MODEL_DIR / name.removesuffix(".zip").split("-")[0]
+            if not (unpack_dir / ".unpacked").is_file():
+                import zipfile
+                with zipfile.ZipFile(dest) as z:
+                    z.extractall(unpack_dir)
+                (unpack_dir / ".unpacked").write_text("ok")
         done += size
 
 

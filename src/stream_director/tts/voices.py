@@ -1,9 +1,8 @@
-"""Референсы голосов: data/voices/<имя>.wav + <имя>.txt (транскрипт)."""
+"""Референсы голосов: data/voices/<имя>.wav (один WAV, без транскрипта)."""
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from ..paths import VOICES_DIR
 
@@ -15,46 +14,34 @@ _NAME_RE = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9_-]{1,32}$")
 def list_voices() -> list[str]:
     names = []
     if VOICES_DIR.is_dir():
-        for wav in VOICES_DIR.glob("*.wav"):
-            if wav.with_suffix(".txt").is_file():
-                names.append(wav.stem)
+        names = [wav.stem for wav in VOICES_DIR.glob("*.wav")]
     return [DEFAULT_VOICE, *sorted(names)]
 
 
-def save_voice(name: str, wav: bytes, transcript: str) -> None:
+def save_voice(name: str, wav: bytes) -> None:
     if not _NAME_RE.match(name) or name == DEFAULT_VOICE:
         raise ValueError("имя: буквы/цифры/дефис/подчёркивание, до 32 символов")
-    if not transcript.strip():
-        raise ValueError("нужен текст-транскрипт референса")
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
     (VOICES_DIR / f"{name}.wav").write_bytes(wav)
-    (VOICES_DIR / f"{name}.txt").write_text(transcript.strip(), encoding="utf-8")
 
 
 def delete_voice(name: str) -> bool:
-    paths = voice_paths(name)
-    if paths is None:
+    if name == DEFAULT_VOICE or not _NAME_RE.match(name):
         return False
-    for p in paths:
-        p.unlink(missing_ok=True)
+    wav = VOICES_DIR / f"{name}.wav"
+    if not wav.is_file():
+        return False
+    wav.unlink()
+    # Транскрипты эпохи S1-mini: больше не читаются, но не должны сиротеть.
+    (VOICES_DIR / f"{name}.txt").unlink(missing_ok=True)
     return True
 
 
-def voice_paths(name: str) -> tuple[Path, Path] | None:
-    """(wav, txt) существующего референса; default и незнакомые имена — None."""
-    if name == DEFAULT_VOICE or not _NAME_RE.match(name):
-        return None
-    wav, txt = VOICES_DIR / f"{name}.wav", VOICES_DIR / f"{name}.txt"
-    return (wav, txt) if wav.is_file() and txt.is_file() else None
-
-
-def pick_voice(settings, stim_type: str, priority) -> str:
-    """Голос под контекст: override по типу > правило по приоритету > дефолт.
-
-    Имя без файлов референса игнорируется на своём уровне — синтез не падает.
-    """
+def pick_voice(settings, stim_type: str, priority, marker: str | None = None) -> str:
+    """Голос под контекст: маркер > override по типу > приоритет > дефолт."""
     known = set(list_voices())
     for candidate in (
+        settings.voice_by_marker.get(marker) if marker else None,
         settings.voice_overrides.get(stim_type),
         settings.voice_by_priority.get(priority.name.lower()),
         settings.default_voice,

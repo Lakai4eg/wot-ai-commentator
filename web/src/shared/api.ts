@@ -26,6 +26,7 @@ export interface SettingsDto {
   default_voice: string;
   voice_by_priority: Record<string, string>;
   voice_overrides: Record<string, string>;
+  voice_by_marker: Record<string, string>;
 }
 
 export interface Persona {
@@ -111,11 +112,10 @@ export const api = {
     req<{ ok: boolean; reply: string | null; error: string | null }>("/api/llm/test", {
       method: "POST",
     }),
-  getVoices: () => req<{ voices: string[] }>("/api/voices"),
-  uploadVoice: (name: string, transcript: string, file: File) => {
+  getVoices: () => req<{ voices: string[]; markers: string[] }>("/api/voices"),
+  uploadVoice: (name: string, file: File) => {
     const form = new FormData();
     form.append("name", name);
-    form.append("transcript", transcript);
     form.append("file", file);
     // Без Content-Type: браузер сам ставит boundary для multipart.
     return fetch("/api/voices", { method: "POST", body: form }).then(async (r) => {
